@@ -7,7 +7,7 @@
  * All Rights Reserved.
  *************************************************************************************/
 
-	jQuery.Class("Vtiger_List_Js",{
+jQuery.Class("Vtiger_List_Js",{
 
 		listInstance : false,
 		FindDuplicatesinstance : false,
@@ -744,7 +744,7 @@
 				}
 			})
 		}
-	},{
+},{
 
 		//contains the List View element.
 		listViewContainer : false,
@@ -2300,4 +2300,4 @@
 		registerTimeListSearch : function(container) {
 			app.registerEventForTimeFields(container,false);
 		}
-	});
+});
