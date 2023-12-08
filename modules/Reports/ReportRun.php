@@ -4364,7 +4364,7 @@ class ReportRun extends CRMEntity
 					} elseif ($type == 'double' || $type == 'currency') {
 						//double is currently not in userformat
 						if (isset($currencySymbol)) $value = str_replace($currencySymbol, '', html_entity_decode($value));
-						$value = ($type == 'currency') ? CurrencyField::convertToDBFormat($value, null, true) : $value;
+						$value = CurrencyField::convertToDBFormat($value, null, true);
 						$worksheet->setCellValueByColumnAndRow($count, $rowcount, $value, PHPExcel_Cell_DataType::TYPE_NUMERIC);
 						if ($type == 'currency') $worksheet->getStyleByColumnAndRow($count, $rowcount)->getNumberFormat()->setFormatCode($currencyFormat);
 					} else {
