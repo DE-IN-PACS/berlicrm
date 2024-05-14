@@ -6,11 +6,13 @@
 * The Initial Developer of the Original Code is vtiger.
 * Portions created by vtiger are Copyright (C) vtiger.
 * All Rights Reserved.
-*
+* Modified and improved by crm-now.de
 ********************************************************************************/
 -->*}
 {strip}
+    
     {if !empty($CUSTOM_VIEWS)}
+        
         <div class="relatedContainer listViewPageDiv margin0px">
             <input type="hidden" name="emailEnabledModules" value=true />
             <input type="hidden" id="view" value="{$VIEW}" />
@@ -31,13 +33,13 @@
                         {foreach item=RELATED_LINK from=$RELATED_LIST_LINKS['LISTVIEWBASIC']}
                             <div class="btn-group">
                                 {assign var=IS_SELECT_BUTTON value={$RELATED_LINK->get('_selectRelation')}}
-                                {assign var=IS_SEND_EMAIL_BUTTON value={$RELATED_LINK->get('_sendEmail')}}
+                                {assign var=IS_MASS_DELETE_BUTTON value={$RELATED_LINK->get('_massDelete')}}
                                 <button type="button" class="btn addButton
-                                {if $IS_SELECT_BUTTON eq true} selectRelation {/if} "
+                                {if $IS_SELECT_BUTTON eq true} selectRelation {/if} {if $IS_MASS_DELETE_BUTTON eq true} massDeleteRelations {/if}"
                             {if $IS_SELECT_BUTTON eq true} data-moduleName='{$RELATED_LINK->get('_module')->get('name')}' {/if}
                         {if $RELATION_FIELD} data-name="{$RELATION_FIELD->getName()}" {/if}
-                {if $IS_SEND_EMAIL_BUTTON eq true}	onclick="{$RELATED_LINK->getUrl()}" {else} data-url="{$RELATED_LINK->getUrl()}"{/if}
-                {if ($IS_SELECT_BUTTON eq false) and ($IS_SEND_EMAIL_BUTTON eq false)}
+                {if $IS_MASS_DELETE_BUTTON eq true}	onclick="{$RELATED_LINK->getUrl()}" {else} data-url="{$RELATED_LINK->getUrl()}"{/if}
+                {if ($IS_SELECT_BUTTON eq false) and ($IS_MASS_DELETE_BUTTON eq false)}
                     name="addButton"><i class="icon-plus"></i>
                 {else}
                     > {* closing the button tag *}
@@ -117,7 +119,7 @@
                     <th width="4%">
                         <input type="checkbox" id="listViewEntriesMainCheckBox"/>
                     </th>
-                    {foreach item=HEADER_FIELD from=$RELATED_HEADERS}
+                   {foreach item=HEADER_FIELD from=$RELATED_HEADERS}
                         <th nowrap>
                             {if $HEADER_FIELD->get('column') eq 'access_count' or $HEADER_FIELD->get('column') eq 'idlists' }
                                 <a href="javascript:void(0);" class="noSorting">{vtranslate($HEADER_FIELD->get('label'), $RELATED_MODULE->get('name'))}</a>
@@ -130,11 +132,7 @@
                         </th>
                     {/foreach}
                     <th nowrap colspan="2">
-                    {* crm-now: Table sortable by status column, either using the untranslated(!) status string, or its sortorderid. Uncomment one of the following assigns: *}
-                    {* ASSIGN var=STATUSCOLUMNFIELD value="campaignrelstatus" *}
-                    {ASSIGN var=STATUSCOLUMNFIELD value="vtiger_campaignrelstatus.sortorderid"}
-                        <a href="javascript:void(0);" class="relatedListHeaderValues" data-nextsortorderval="{if $COLUMN_NAME eq $STATUSCOLUMNFIELD}{$NEXT_SORT_ORDER}{else}ASC{/if}" data-fieldname="{$STATUSCOLUMNFIELD}">{vtranslate("Status", $RELATED_MODULE->get('name'))}
-                                    &nbsp;&nbsp;{if $COLUMN_NAME eq $STATUSCOLUMNFIELD}<img class="{$SORT_IMAGE}">{/if}
+                        <a href="javascript:void(0);" class="noSorting"></a>
                     </th>
                 </tr>
             </thead>
@@ -143,7 +141,7 @@
                     <td width="4%" class="{$WIDTHTYPE}">
                         <input type="checkbox" value="{$RELATED_RECORD->getId()}" class="listViewEntriesCheckBox"/>
                     </td>
-                    {foreach item=HEADER_FIELD from=$RELATED_HEADERS}
+                   {foreach item=HEADER_FIELD from=$RELATED_HEADERS}
                         {assign var=RELATED_HEADERNAME value=$HEADER_FIELD->get('name')}
                         <td nowrap class="{$WIDTHTYPE}">
                             {if $HEADER_FIELD->isNameField() eq true or $HEADER_FIELD->get('uitype') eq '4'}
@@ -156,19 +154,6 @@
                             {/if}
                         </td>
                     {/foreach}
-                    <td nowrap class="{$WIDTHTYPE}">
-                        <span class="currentStatus btn-group">
-                            <span class="statusValue dropdown-toggle" data-toggle="dropdown">{vtranslate($RELATED_RECORD->get('status'),$MODULE)}</span>{* ** status column value ** *}
-                            <i title="{vtranslate('LBL_EDIT', $MODULE)}" class="icon-arrow-down alignMiddle editRelatedStatus"></i>
-                            <ul class="dropdown-menu pull-right" style="margin-right: -28px">
-                                {foreach key=STATUS_ID item=STATUS from=$STATUS_VALUES}
-                                    <li id="{$STATUS_ID}" data-status="{vtranslate($STATUS, $MODULE)}">
-                                        <a>{vtranslate($STATUS, $MODULE)}</a>
-                                    </li>
-                                {/foreach}
-                            </ul>
-                        </span>
-                    </td>
                     <td nowrap class="{$WIDTHTYPE}">
                         <div class="pull-right actions">
                             <span class="actionImages">
@@ -183,7 +168,7 @@
                         </div>
                     </td>
                 </tr>
-            {/foreach}
+           {/foreach}
         </table>
     </div>
 </div>
