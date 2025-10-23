@@ -7,15 +7,13 @@
  * modified by: crm-now, www.crm-now.de
  ********************************************************************************/
 function createpdffile ($idnumber,$purpose='', $path='',$current_id='') {
-	require_once('libraries/tcpdf/tcpdf.php');
-	require_once('libraries/tcpdf/config/tcpdf_config.php');
 	require_once('modules/SalesOrder/SalesOrder.php');
 	require_once('modules/SalesOrder/pdf_templates/footer.php');
 	require_once('include/database/PearDatabase.php');
 	require_once('include/utils/InventoryUtils.php');
 	require_once('modules/Pdfsettings/helpers/PDFutils.php');
 	global $FOOTER_PAGE, $default_font, $font_size_footer, $NUM_FACTURE_NAME, $pdf_strings, $SalesOrder_no, $footer_margin;
-	global $org_name, $org_address, $org_city, $org_code, $org_country, $org_state, $org_vatid, $org_taxid, $org_phone, $org_fax, $org_website;
+	global $org_name, $org_address, $org_city, $org_code, $org_country, $org_irs, $org_taxid, $org_phone, $org_fax, $org_website;
 	global $VAR40_NAME, $VAR3_NAME, $VAR4_NAME,$ORG_POSITION,$VAR_PAGE, $VAR_OF;
 	//bank information - content
 	global $bank_name , $bank_street , $bank_city ,$bank_zip ,$bank_country, $bank_account, $bank_routing, $bank_iban, $bank_swift;
@@ -125,7 +123,7 @@ function createpdffile ($idnumber,$purpose='', $path='',$current_id='') {
 		$org_phone = $adb->query_result($result,0,"phone");
 		$org_fax = $adb->query_result($result,0,"fax");
 		$org_taxid = $adb->query_result($result,0,"tax_id");
-		$org_vatid = $adb->query_result($result,0,"vatid");
+		$org_irs = $adb->query_result($result,0,"irs");
 		$org_website = $adb->query_result($result,0,"website");
 
 		$logo_name = decode_html($adb->query_result($result,0,"logoname"));
@@ -504,7 +502,7 @@ function createpdffile ($idnumber,$purpose='', $path='',$current_id='') {
 	//formating company name for file name
 	$export_org = utf8_decode($account_name);
 	$export_org = decode_html(strtolower($export_org));
-    $export_org = str_replace(array(" ","ö","ä","ü","ß","Ö","Ä","Ü","/","\\"),array("_","oe","ae","ue","ss","Oe","Ae","Ue","_","_"),$export_org);
+    $export_org = str_replace(array(" ","�","�","�","�","�","�","�","/","\\"),array("_","oe","ae","ue","ss","Oe","Ae","Ue","_","_"),$export_org);
 	//remove not printable ascii char
 	$export_org = preg_replace('/[\x00-\x1F\x80-\xFF]/', '', $export_org);
 
@@ -521,7 +519,7 @@ function createpdffile ($idnumber,$purpose='', $path='',$current_id='') {
 	elseif ($purpose=='send'){
 		// send pdf with mail
 		$translatedName = vtranslate('SINGLE_SalesOrder', 'SalesOrder');
-		$pdf->Output('storage/'.$translatedName.'_'.$SalesOrder_no.'.pdf','F'); 
+		$pdf->Output(dirname(__DIR__, 2).'/storage/'.$translatedName.'_'.$SalesOrder_no.'.pdf','F'); 
 		return;
 	}
 	exit;

@@ -4,6 +4,12 @@
     "type": "project",
     "require": {
         "horstoeko/zugferd": "^1.0",
-        "symfony/intl": "^5.4"
-    }
+        "symfony/intl": "^5.4",
+        "sprain/swiss-qr-bill": "^3.2",
+        "phpoffice/phpspreadsheet": "^1.29",
+        "adodb/adodb-php": "^5.22",
+        "smarty/smarty": "^5.4",
+        "tecnickcom/tcpdf": "^6.8"
+    },
+    "_comment": "Where is phpspreadsheet used?"
 }

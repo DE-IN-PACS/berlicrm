@@ -307,8 +307,12 @@ $languageStrings = array(
     //ADDED FOR BACKUP DOWNLOAD
     'LBL_DOWNLOAD_BACKUP_FILE' => 'Backup-Archiv herunterladen',
     'LBL_BACKUP_INSTRUCTIONS' => 'Hier können Sie eine vollständige, täglich aktualisierte Sicherung der Daten ihres CRMs als ZIP-Archiv herunterladen.<br><b>Bitte verwahren Sie die Datei unbedingt an einem sicheren Ort.</b>',
-    'LBL_DOWNLOAD' => 'Download starten'
-	
+    'LBL_DOWNLOAD' => 'Download starten',
+
+	//added for default values in Tax Index
+	'LBL_VAT' => 'MwSt.',
+	'LBL_SALES_TAX' => 'ohne',
+	'LBL_SERVICE_TAX' => 'ohne',
 );
 
 $jsLanguageStrings = array(

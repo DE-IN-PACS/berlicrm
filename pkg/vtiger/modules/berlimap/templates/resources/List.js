@@ -42,6 +42,7 @@ Vtiger_List_Js('berlimap_List_Js', {
 				};
 				Vtiger_Helper_Js.showPnotify(mparams);
 				$('#showButton').prop('disabled', false);
+				return;
 			}
 			//get the own location from browser
 			if (navigator.geolocation) {
@@ -178,7 +179,6 @@ Vtiger_List_Js('berlimap_List_Js', {
 		$.each( geodata, function( recordid, geolocation ) {
 			approx = geolocation.approx;
 			
-			var iconpath = geolocation.iconpath
 			var iconFeature = new ol.Feature({
 			  geometry: new  
 				//convert string to integer
@@ -191,21 +191,6 @@ Vtiger_List_Js('berlimap_List_Js', {
 				currentlatitude: thisInstance.currentloc.latitude,
 				rainfall: 500
 			});
-			// Define icon style for each location
-			var iconStyle = new ol.style.Style({
-				image: new ol.style.Icon({
-					anchor: [0.5, 46],
-					anchorXUnits: 'fraction',
-					anchorYUnits: 'pixels',
-					opacity: 0.75,
-					src: iconpath
-				})
-			});
-
-			// Set the style on the feature
-			iconFeature.setStyle(iconStyle);
-
-			// Add feature to the array
 			iconFeatures.push(iconFeature);
 			
 		});
@@ -213,101 +198,105 @@ Vtiger_List_Js('berlimap_List_Js', {
 		var vectorSource = new ol.source.Vector({
 		  features: iconFeatures 
 		});
-		
-		// Create the vector layer with the source
+		//define icon style for all entries
+		var iconStyle = new ol.style.Style({
+			image: new ol.style.Icon(/** @type {olx.style.IconOptions} */ ({
+			anchor: [0.5, 46],
+			anchorXUnits: 'fraction',
+			anchorYUnits: 'pixels',
+			opacity: 0.75,
+			src: iconpath
+		  }))
+		});
 		thisInstance.vectorLayer = new ol.layer.Vector({
-			source: vectorSource
+		  source: vectorSource,
+		  style: iconStyle
 		});
 
-		// Add the vector layer to the map 
 		thisInstance.map.addLayer(thisInstance.vectorLayer); 
 		thisInstance.map.render();
 		/////////////////////////////////////////////////////////////////////////
 		// Add a click handler to the map to render the popup.
 		/////////////////////////////////////////////////////////////////////////
-		if (!thisInstance.isClickListenerRegistered) {
-			thisInstance.map.on('singleclick', function(evt) {
-				$(popup).show();
-				var locdatareference = thisInstance.map.forEachFeatureAtPixel(evt.pixel, function(feature) {
-					return [feature.get('name'), feature.get('targetURL') , feature.get('longitude'), feature.get('latitude') , feature.get('currentlongitude'), feature.get('currentlatitude'), feature.get('recordid')];
-				})
-				var coordinate = evt.coordinate;
-				if ( typeof locdatareference !== 'undefined'  && locdatareference[0] != '' ) {
-					if (locdatareference[0] == 'mylocation') {
-						thisInstance.content.innerHTML = '<p>'+app.vtranslate('JS_GEODATA_MY_LOCATION')+'</p>';
-						thisInstance.overlay.setPosition(coordinate);
-					}
-					else if (typeof locdatareference[1] !== 'undefined' && locdatareference[1] != ''){
-						//get distance to current location
-						var distance = 0;
+		thisInstance.map.on('singleclick', function(evt) {
+			$(popup).show();
+			var locdatareference = thisInstance.map.forEachFeatureAtPixel(evt.pixel, function(feature) {
+				return [feature.get('name'), feature.get('targetURL') , feature.get('longitude'), feature.get('latitude') , feature.get('currentlongitude'), feature.get('currentlatitude'), feature.get('recordid')];
+			})
+			var coordinate = evt.coordinate;
+			if ( typeof locdatareference !== 'undefined'  && locdatareference[0] != '' ) {
+				if (locdatareference[0] == 'mylocation') {
+					thisInstance.content.innerHTML = '<p>'+app.vtranslate('JS_GEODATA_MY_LOCATION')+'</p>';
+					thisInstance.overlay.setPosition(coordinate);
+				}
+				else if (typeof locdatareference[1] !== 'undefined' && locdatareference[1] != ''){
+					//get distance to current location
+					var distance = 0;
 
-						var params = {
-							'currentloclong' : locdatareference[4],
-							'currentloclatt' : locdatareference[5],
-							'targetloclong' : locdatareference[2],
-							'targetloclatt' : locdatareference[3],
-							'unit' : 'K',
-							'module' : 'berlimap',
-							'action' : 'ListAjax',
-							'mode' : 'getGeoDistance'
-						}
-						var progressIndicatorElement = jQuery.progressIndicator();
-						AppConnector.request(params).then(
-							function(responseData){
-								progressIndicatorElement.progressIndicator({'mode' : 'hide'});
-								thisInstance.content.innerHTML = '';
-								$('#showButton').prop('disabled', false);
-								if(responseData.success){
-									distance = responseData.result;
-									if (thisInstance.calculatedistance == true) {
-										thisInstance.content.innerHTML = '<a href="'+locdatareference[1]+'" target="_blank">'+locdatareference[0]+'</a><br>Entfernung vom Standort: '+distance+' km';
-									}
-									else {
-										thisInstance.content.innerHTML = '<a href="'+locdatareference[1]+'" target="_blank">'+locdatareference[0]+'</a>';
-									}
-									// Retrieve dynamic content and append it when Ajax call returns a value
-									thisInstance.getDynamicContent(locdatareference[1]).then(function(dynamicContent) {
-										thisInstance.content.innerHTML += dynamicContent;
-									});							
-									thisInstance.overlay.setPosition(coordinate);
+					var params = {
+						'currentloclong' : locdatareference[4],
+						'currentloclatt' : locdatareference[5],
+						'targetloclong' : locdatareference[2],
+						'targetloclatt' : locdatareference[3],
+						'unit' : 'K',
+						'module' : 'berlimap',
+						'action' : 'ListAjax',
+						'mode' : 'getGeoDistance'
+					}
+					var progressIndicatorElement = jQuery.progressIndicator();
+					AppConnector.request(params).then(
+						function(responseData){
+							progressIndicatorElement.progressIndicator({'mode' : 'hide'});
+							thisInstance.content.innerHTML = '';
+							$('#showButton').prop('disabled', false);
+							if(responseData.success){
+								distance = responseData.result;
+								if (thisInstance.calculatedistance == true) {
+									thisInstance.content.innerHTML = '<a href="'+locdatareference[1]+'" target="_blank">'+locdatareference[0]+'</a><br>Entfernung vom Standort: '+distance+' km';
 								}
 								else {
-									var mparams = {
-										title : app.vtranslate('BIG PROBLEM'),
-										text: responseData.error.code,
-										animation: 'show',
-										type: 'error'
-									};
-									Vtiger_Helper_Js.showPnotify(mparams);
-									return false;
+									thisInstance.content.innerHTML = '<a href="'+locdatareference[1]+'" target="_blank">'+locdatareference[0]+'</a>';
 								}
-							},
-
-							function(textStatus, errorThrown){
-								progressIndicatorElement.progressIndicator({'mode' : 'hide'});
+								// Retrieve dynamic content and append it when Ajax call returns a value
+								thisInstance.getDynamicContent(locdatareference[1]).then(function(dynamicContent) {
+									thisInstance.content.innerHTML += dynamicContent;
+								});
+								thisInstance.overlay.setPosition(coordinate);
+							}
+							else {
 								var mparams = {
-									title : textStatus,
-									text: errorThrown,
+									title : app.vtranslate('BIG PROBLEM'),
+									text: responseData.error.code,
 									animation: 'show',
 									type: 'error'
 								};
 								Vtiger_Helper_Js.showPnotify(mparams);
 								return false;
 							}
-						);
-						
-						
-					}
-					else {
-						thisInstance.content.innerHTML = '<p>'+app.vtranslate('JS_GEODATA_NO_LOCATION')+'</p>';
-						thisInstance.overlay.setPosition(coordinate);
-					}
+						},
+
+						function(textStatus, errorThrown){
+							progressIndicatorElement.progressIndicator({'mode' : 'hide'});
+							var mparams = {
+								title : textStatus,
+								text: errorThrown,
+								animation: 'show',
+								type: 'error'
+							};
+							Vtiger_Helper_Js.showPnotify(mparams);
+							return false;
+						}
+					);
+					
+					
+					
 				}
-			});
-			// Set the flag to true after registration
-			thisInstance.isClickListenerRegistered = true;
-			
-		}
+				else {
+					thisInstance.content.innerHTML = '<p>'+app.vtranslate('JS_GEODATA_NO_LOCATION')+'</p>';
+					thisInstance.overlay.setPosition(coordinate);
+				}
+			}
+		});
 		
 		thisInstance.map.on('pointermove', function(evt) {
 			thisInstance.map.getTargetElement().style.cursor = thisInstance.map.hasFeatureAtPixel(evt.pixel) ? 'pointer' : '';
@@ -341,8 +330,8 @@ Vtiger_List_Js('berlimap_List_Js', {
 				duration: 250
 			}
 		}));
-		var defaultLonLat = [13.40,52.52];
-		var berlinWebMercator = ol.proj.fromLonLat(defaultLonLat);
+		var berlinLonLat = [13.40,52.52];
+		var berlinWebMercator = ol.proj.fromLonLat(berlinLonLat);
 		thisInstance.map = new ol.Map({
 			layers: [
 				new ol.layer.Tile({
@@ -356,8 +345,8 @@ Vtiger_List_Js('berlimap_List_Js', {
 				zoom: 6
 			})
 		});
-		thisInstance.currentloc.longitude = defaultLonLat[0];
-		thisInstance.currentloc.latitude = defaultLonLat[1];
+		thisInstance.currentloc.longitude = berlinLonLat[0];
+		thisInstance.currentloc.latitude = berlinLonLat[1];
 		trackMe(thisInstance.map.getView());
 		
 		
@@ -408,65 +397,6 @@ Vtiger_List_Js('berlimap_List_Js', {
 			thisInstance.map.addLayer(vectorLayer);
 		};
 	
-	},
-
-	getDynamicContent(detailviewurl) {
-		return new Promise((resolve, reject) => {
-			// Split the string by '&' to get individual query parameters
-			const parts = detailviewurl.split('&');
-
-			// Find the parameter that starts with 'record='
-			const recordParts = parts.find(part => part.startsWith('record='));
-
-			// Extract the value of 'recordid' if it exists
-			const recordid = recordParts ? recordParts.split('=')[1] : '';
-
-			if (recordid !== '') {
-				var params = {
-					'recordid': recordid,
-					'module': 'berlimap',
-					'action': 'getFurtherDataToDisplay',
-					'mode': 'getDisplayData'
-				};
-				var progressIndicatorElement = jQuery.progressIndicator();
-				AppConnector.request(params).then(
-					function(responseData) {
-						progressIndicatorElement.progressIndicator({ 'mode': 'hide' });
-						if (responseData.success) {
-							// Resolve with the retrieved data
-							resolve(responseData.result); 
-						} 
-						else {
-							var mparams = {
-								title: app.vtranslate('BIG PROBLEM'),
-								text: responseData.error.code,
-								animation: 'show',
-								type: 'error'
-							};
-							Vtiger_Helper_Js.showPnotify(mparams);
-							// Resolve with an empty string in case of error
-							resolve(''); 
-						}
-					},
-					function(textStatus, errorThrown) {
-						progressIndicatorElement.progressIndicator({ 'mode': 'hide' });
-						var mparams = {
-							title: textStatus,
-							text: errorThrown,
-							animation: 'show',
-							type: 'error'
-						};
-						Vtiger_Helper_Js.showPnotify(mparams);
-						// Resolve with an empty string in case of error
-						resolve(''); 
-					}
-				);
-			} 
-			else {
-				// Resolve with an empty string if no recordid
-				resolve(''); 
-			}
-		});
 	},
 	
     registerEvents : function() {

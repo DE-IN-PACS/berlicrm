@@ -52,7 +52,7 @@ class Vtiger_Functions {
 	}
 
 	static function currentUserDisplayDateNew() {
-		global $log, $current_user;
+		global $current_user;
 		$date = new DateTimeField(null);
 		return $date->getDisplayDate($current_user);
 	}
@@ -479,6 +479,9 @@ class Vtiger_Functions {
 
 	// Utility
 	static function formatDecimal($value){
+		if ($value === '' || $value === null) {
+			return '';
+		}			
 		$fld_value = explode('.', $value);
 		if(isset ($fld_value[1]) && $fld_value[1] != ''){
 			$fld_value = rtrim($value, '0');
@@ -575,6 +578,20 @@ class Vtiger_Functions {
 		return $filepath;
 	}
 
+	static function validateImageMetadata($data, $short=true) {
+		if (is_array($data)) {
+			foreach ($data as $key => $value) {
+				$ok = self::validateImageMetadata($value);
+				if (!$ok) return false;
+			}
+		} else {
+			if (stripos($data, $short ? "<?" : "<?php") !== false) { // suspicious dynamic content 
+				return false;
+			}
+		}
+		return true;
+	}
+
 	static function validateImage($file_details) {
 		global $app_strings;
 		$allowedImageFormats = array('jpeg', 'png', 'jpg', 'pjpeg', 'x-png', 'gif', 'bmp', 'xcf');
@@ -597,6 +614,15 @@ class Vtiger_Functions {
 		$mimeTypeContents = explode('/', $mimeType);
 		if (!$file_details['size'] || strtolower($mimeTypeContents[0]) !== 'image' || !in_array($mimeTypeContents[1], $mimeTypesList)) {
 			$saveimage = 'false';
+		}
+
+		//metadata check
+		$shortTagSupported = ini_get('short_open_tag') ? true : false;
+		if ($saveimage == 'true' && in_array($filetype, array('jpeg', 'jpg', 'pjpeg', 'xcf'))) {
+			$exifdata = exif_read_data($file_details['tmp_name']);
+			if ($exifdata && !self::validateImageMetadata($exifdata, $shortTagSupported)) {
+				$saveimage = 'false';
+			}
 		}
 
 		// Check for php code injection
@@ -632,38 +658,23 @@ class Vtiger_Functions {
 	}
 
 	static function getMergedDescriptionCustomVars($fields, $description) {
-		global $current_user, $default_timezone;
+		global $current_user;
 		date_default_timezone_set($current_user->time_zone);
-		
-		$dateFormat = new IntlDateFormatter(
-			$current_user->language,
-			IntlDateFormatter::FULL,
-			IntlDateFormatter::FULL,
-			$current_user->time_zone,
-			IntlDateFormatter::GREGORIAN,
-			'dd. MMMM yyyy'
-		);
-
-		$timeFormat = new IntlDateFormatter(
-			$current_user->language,
-			IntlDateFormatter::FULL,
-			IntlDateFormatter::FULL,
-			$current_user->time_zone,
-			IntlDateFormatter::GREGORIAN,
-			'HH:mm:ss (zz)'
-		);
+		$user_lang_arr = explode("_",$current_user->language);
+		$user_lang_arr[1] = strtoupper ($user_lang_arr[1]);
+		$user_lang = implode("_", $user_lang_arr);
+		setlocale(LC_TIME, $user_lang, $user_lang.'UTF-8');
 		foreach ($fields['custom'] as $columnname) {
 			$token_data = '$custom-' . $columnname . '$';
 			$token_value = '';
 			switch ($columnname) {
-				case 'currentdate': $token_value = $dateFormat->format(microtime(true));
+				case 'currentdate': $token_value = strftime("%d. %B %Y");
 					break;
-				case 'currenttime': $token_value = $timeFormat->format(microtime(true));
+				case 'currenttime': $token_value = strftime("%T (%Z)");
 					break;
 			}
 			$description = str_replace($token_data, $token_value, $description);
 		}
-		date_default_timezone_set($default_timezone);
 		return $description;
 	}
 	
@@ -1343,35 +1354,19 @@ class Vtiger_Functions {
 		return $rowListColor;
 	}
 
-	//
-	/**
-	 * Check Valid Dataformat
-	 * @param  string 	$dateValue	Date to validate
-	 * @return boolean				Indicator for valid Format
-	*/
-	public static function checkValidYearFormat($dateValue) {
-		$regexExpression = '/^(?:\d{4}-\d{2}-\d{2}|NULL)$/';
-		if (preg_match($regexExpression, $dateValue)) {
-			return true;
-		}
-		else {
-			return false;
-		}
-	}
-
-	public static function deleteAttachment($attachment) {
-		global $adb;
-		$attachId = $attachment['attachmentsid'];
-		$attachPath = $attachment['path'];
-		$attachName = $attachment['name'];
-		$fullPath = $attachPath . $attachId . "_" . $attachName;
-		if (file_exists($fullPath)) {
-			$delQuery = "DELETE attachments, crmentity FROM vtiger_attachments attachments 
-				INNER JOIN vtiger_crmentity crmentity ON attachments.attachmentsid = crmentity.crmid 
-				WHERE attachments.attachmentsid = ?";
-			$adb->pquery($delQuery, array($attachId));
-			unlink($fullPath);
-		}
+    public static function deleteAttachment($attachment) {
+            global $adb;
+            $attachId = $attachment['attachmentsid'];
+            $attachPath = $attachment['path'];
+            $attachName = $attachment['name'];
+            $fullPath = $attachPath . $attachId . "_" . $attachName;
+            if (file_exists($fullPath)) {
+                $delQuery = "DELETE attachments, crmentity FROM vtiger_attachments attachments 
+                    INNER JOIN vtiger_crmentity crmentity ON attachments.attachmentsid = crmentity.crmid 
+                    WHERE attachments.attachmentsid = ?";
+                $adb->pquery($delQuery, array($attachId));
+                unlink($fullPath);
+            }
     }
 
     public static function getAttachmentInfo($id) {
@@ -1390,7 +1385,28 @@ class Vtiger_Functions {
         return false;
     }
 
+	/**
+	 * Resolves the source module of a given record ID.
+	 * Checks whether the ID belongs to a user or a CRM module record.
+	 *
+	 * @param int $recordId The record ID to resolve.
+	 * @return string|null The module name (e.g. 'Users', 'Contacts'), or null if not found.
+	 */
+	public static function resolveRecordSource($recordId) {
+		$adb = PearDatabase::getInstance();
+
+		$setype = self::getCRMRecordType($recordId);
+		if ($setype !== null) {
+			return $setype;
+		}
+		$queryUserId = "SELECT id FROM vtiger_users WHERE id = ?";
+		$result = $adb->pquery($queryUserId, array($recordId));
+		if ($result && $adb->num_rows($result) > 0) {
+			return 'Users';
+		}
+		return null;
+	}
+
+
+
 }
-
-
-

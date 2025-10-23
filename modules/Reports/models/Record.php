@@ -692,8 +692,8 @@ class Reports_Record_Model extends Vtiger_Record_Model {
         global $adb;
         $count = 0;
         $result = $adb->query($query, array());
-        if ($result) {
-            $count = $adb->num_rows($result);
+        if($adb->num_rows($result) > 0 ){
+            $count = $adb->query_result($result, 0, 'count');
         }
         return $count;
     }
@@ -712,9 +712,9 @@ class Reports_Record_Model extends Vtiger_Record_Model {
 		$rootDirectory = vglobal('root_directory');
 		$tmpDir = vglobal('tmp_dir');
 
+		//Changed Format from xls to xlsx
 		$tempFileName = tempnam($rootDirectory.$tmpDir, 'xlsx');
-		$fileName = decode_html($this->getName()).'.xlsx';
-		$fileName = str_replace('?', '_', $fileName);
+		$fileName = decode_html(trim($this->getName())).'.xlsx';
 		$reportRun->writeReportToExcelFile($tempFileName, $advanceFilterSql);
 
 		if(isset($_SERVER['HTTP_USER_AGENT']) && strpos($_SERVER['HTTP_USER_AGENT'], 'MSIE')) {
@@ -726,7 +726,8 @@ class Reports_Record_Model extends Vtiger_Record_Model {
 		header('Content-Length: '.@filesize($tempFileName));
 		header('Content-disposition: attachment; filename="'.$fileName.'"');
 
-		readfile($tempFileName);
+		$fp = fopen($tempFileName, 'rb');
+		fpassthru($fp);
 		unlink($tempFileName);
 	}
 
