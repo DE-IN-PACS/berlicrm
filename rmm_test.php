@@ -7,18 +7,50 @@
  * Löschen nach Diagnose!
  */
 
-// ── Bootstrap: vtiger-Datenbankzugriff laden ─────────────────────────────────
-define('DOING_AJAX', true);
+// ── Bootstrap: Direkte PDO-Verbindung über vtiger-Config ─────────────────────
 chdir(__DIR__);
 
 if (!file_exists('config.php')) {
     die('FEHLER: Dieses Script muss im berliCRM-Root-Verzeichnis liegen.');
 }
 
-require_once 'include/database/PearDatabase.php';
+// vtiger-Konfiguration einlesen – setzt $dbconfig
+$dbconfig = [];
 require_once 'config.php';
 
-$db = PearDatabase::getInstance();
+// Fallback: config.db.php direkt lesen falls $dbconfig leer
+if (empty($dbconfig['db_hostname']) && file_exists('config.db.php')) {
+    require_once 'config.db.php';
+}
+
+// PDO-Verbindung aufbauen
+$pdo = null;
+$pdoError = null;
+try {
+    $host   = $dbconfig['db_hostname'] ?? $dbconfig['db_server'] ?? '127.0.0.1';
+    $port   = !empty($dbconfig['db_port']) ? (int)$dbconfig['db_port'] : 3306;
+    $dbname = $dbconfig['db_name']     ?? '';
+    $user   = $dbconfig['db_username'] ?? $dbconfig['db_user'] ?? '';
+    $pass   = $dbconfig['db_password'] ?? '';
+
+    $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8";
+    $pdo = new PDO($dsn, $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+} catch (Throwable $e) {
+    $pdoError = $e->getMessage();
+}
+
+// Hilfsfunktion: eine Zeile aus PDO-Query holen
+function db_row(PDO $pdo, string $sql, array $params = []): ?array {
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+function db_all(PDO $pdo, string $sql, array $params = []): array {
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+    return $st->fetchAll(PDO::FETCH_ASSOC);
+}
 
 echo '<html><head><meta charset="utf-8">
 <style>
@@ -33,15 +65,23 @@ echo '<html><head><meta charset="utf-8">
 
 echo '<h2>TacticalRMM Diagnose</h2>';
 
+// ── DB-Verbindung prüfen ─────────────────────────────────────────────────────
+if ($pdo === null) {
+    echo "<p class='err'>Datenbankverbindung fehlgeschlagen: " . htmlspecialchars($pdoError ?? 'unbekannter Fehler') . "</p>";
+    echo '</body></html>';
+    exit;
+}
+echo "<p class='ok'>Datenbankverbindung OK ({$dbname}@{$host})</p><hr>";
+
 // ── 1. record-Parameter ──────────────────────────────────────────────────────
 $accountId = isset($_GET['record']) ? (int) $_GET['record'] : 0;
 if (!$accountId) {
     echo '<p class="warn">Bitte URL-Parameter angeben: <b>?record=&lt;accountid&gt;</b><br>';
     echo 'Beispiel: rmm_test.php?record=74</p>';
 
-    $res  = $db->pquery('SELECT accountid, accountname, account_no FROM vtiger_account ORDER BY accountname LIMIT 20', []);
+    $rows = db_all($pdo, 'SELECT accountid, accountname, account_no FROM vtiger_account ORDER BY accountname LIMIT 20');
     echo '<p>Verfügbare Accounts (erste 20):</p><pre>';
-    while ($row = $db->fetchByAssoc($res)) {
+    foreach ($rows as $row) {
         echo "accountid={$row['accountid']}  account_no={$row['account_no']}  name={$row['accountname']}\n";
     }
     echo '</pre></body></html>';
@@ -52,8 +92,7 @@ echo "<h2>Account-ID: {$accountId}</h2><hr>";
 
 // ── 2. account_no aus vtiger_account ────────────────────────────────────────
 echo '<h2>Schritt 1: account_no aus vtiger_account</h2>';
-$res = $db->pquery('SELECT accountid, accountname, account_no FROM vtiger_account WHERE accountid = ?', [$accountId]);
-$row = $db->fetchByAssoc($res);
+$row = db_row($pdo, 'SELECT accountid, accountname, account_no FROM vtiger_account WHERE accountid = ?', [$accountId]);
 if (!$row) {
     echo "<p class='err'>Kein Account mit accountid={$accountId} gefunden.</p>";
     die('</body></html>');

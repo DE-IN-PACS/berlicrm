@@ -58,12 +58,14 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
             foreach ($fields as $f) {
                 $fn = $f['field']       ?? '(kein field-Key)';
                 $fv = $f['value']       ?? '(kein value-Key)';
-                $fieldSummary[] = "{$fn}={$fv}";
-                if (
+                // Vergleich case-insensitiv und ohne Leerzeichen
+                $match = (
                     isset($f['field'], $f['value'])
-                    && strtolower((string) $f['field']) === 'berlicrm_id'
-                    && (string) $f['value'] === $accountNo
-                ) {
+                    && strtolower(trim((string) $f['field'])) === 'berlicrm_id'
+                    && strtolower(trim((string) $f['value'])) === strtolower(trim($accountNo))
+                );
+                $fieldSummary[] = "{$fn}=" . htmlspecialchars((string)$fv);
+                if ($match) {
                     $trmClientId = (int) $clientId;
                 }
             }
