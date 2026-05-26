@@ -57,11 +57,10 @@ WHERE  `profileid` NOT IN (
 -- =============================================================================
 
 -- =============================================================================
--- Custom Field rmm_client_id anlegen (falls noch nicht vorhanden):
---   Settings → Studio → Accounts → Felder → Neu
---   Feldtyp: Text
---   Feldname: rmm_client_id
---   Label: RMM Client ID
--- Das Feld wird NICHT via SQL angelegt – vtiger Studio erzeugt automatisch
--- die nötigen Spalten in vtiger_accountscf und alle Metadaten.
+-- Verknüpfungslogik:
+--   berliCRM liest vtiger_account.account_no (z.B. "ACC27") und sucht in
+--   TacticalRMM nach einem Client mit custom_fields[berlicrm_id] == "ACC27".
+--   Das Custom Field "berlicrm_id" muss einmalig in TacticalRMM angelegt
+--   werden: Settings → Custom Fields → Client → berlicrm_id (Text).
+--   Kein Custom Field in vtiger/berliCRM erforderlich.
 -- =============================================================================

@@ -20,9 +20,7 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         $rmmClientId = $this->fetchRmmClientId($accountId);
 
         if ($rmmClientId === null) {
-            $this->renderAlert('info',
-                'Kein RMM-Client konfiguriert: Feld <strong>rmm_client_id</strong> ist leer. '
-                . 'Bitte im Account-Datensatz unter Studio → Accounts → Felder setzen.');
+            $this->renderAlert('info', 'Keine Account-Nummer (account_no) für diesen Datensatz gefunden.');
             echo '</div>';
             return;
         }
@@ -76,14 +74,14 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
     {
         $db     = PearDatabase::getInstance();
         $result = $db->pquery(
-            'SELECT rmm_client_id FROM vtiger_accountscf WHERE accountid = ?',
+            'SELECT account_no FROM vtiger_account WHERE accountid = ?',
             [$accountId]
         );
         $row = $db->fetchByAssoc($result);
-        if (!$row || trim((string) $row['rmm_client_id']) === '') {
+        if (!$row || trim((string) $row['account_no']) === '') {
             return null;
         }
-        return trim($row['rmm_client_id']);
+        return trim($row['account_no']);
     }
 
     /**
