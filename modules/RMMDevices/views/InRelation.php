@@ -18,8 +18,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             $html .= $this->renderAlert('warning', $configError);
             $html .= $this->renderDebugPanel();
             $html .= '</div>';
-            $html .= $this->renderSelfInsertScript();
-            return $html;
+            $this->sendAndExit($html);
         }
 
         $accountNo = $this->getAccountNo($accountId);
@@ -27,8 +26,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             $html .= $this->renderAlert('info', 'Keine Account-Nummer (account_no) für diesen Datensatz gefunden.');
             $html .= $this->renderDebugPanel();
             $html .= '</div>';
-            $html .= $this->renderSelfInsertScript();
-            return $html;
+            $this->sendAndExit($html);
         }
         $this->log("account_no='{$accountNo}'");
 
@@ -63,8 +61,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
                 $html .= $this->renderAlert('danger', 'TacticalRMM /clients/sites/ nicht erreichbar: ' . htmlspecialchars($err));
                 $html .= $this->renderDebugPanel();
                 $html .= '</div>';
-                $html .= $this->renderSelfInsertScript();
-                return $html;
+                $this->sendAndExit($html);
             }
             $siteList = $sitesData['results'] ?? $sitesData;
             $this->log("Sites geladen: " . count((array)$siteList));
@@ -90,8 +87,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
                 $html .= $this->renderAlert('danger', 'TacticalRMM /clients/ nicht erreichbar: ' . htmlspecialchars($err));
                 $html .= $this->renderDebugPanel();
                 $html .= '</div>';
-                $html .= $this->renderSelfInsertScript();
-                return $html;
+                $this->sendAndExit($html);
             }
             $clientList = $clientsData['results'] ?? $clientsData;
             $this->log("Clients geladen: " . count((array)$clientList));
@@ -114,8 +110,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
                 . htmlspecialchars($accountNo) . '</strong> nicht gefunden).');
             $html .= $this->renderDebugPanel();
             $html .= '</div>';
-            $html .= $this->renderSelfInsertScript();
-            return $html;
+            $this->sendAndExit($html);
         }
 
         // ── Step 3: Agents laden ─────────────────────────────────────────────
@@ -133,8 +128,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             $html .= $this->renderAlert('danger', 'Fehler beim Laden der Agents: ' . htmlspecialchars($err));
             $html .= $this->renderDebugPanel();
             $html .= '</div>';
-            $html .= $this->renderSelfInsertScript();
-            return $html;
+            $this->sendAndExit($html);
         }
         $agentList = $agentsData['results'] ?? $agentsData;
         $this->log("Agents geladen: " . count((array)$agentList));
@@ -142,9 +136,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         $html .= $this->renderTable((array)$agentList);
         $html .= $this->renderDebugPanel();
         $html .= '</div>';
-        $html .= $this->renderSelfInsertScript();
-
-        return $html;
+        $this->sendAndExit($html);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -325,6 +317,21 @@ HTML;
 })(jQuery);
 </script>
 JS;
+    }
+
+    private function sendAndExit(string $html): void
+    {
+        // csrf-magic.js strips X-PJAX/X-Requested-With headers, causing isAjax()=false,
+        // which triggers triggerPreProcess() to buffer a full HTML page before our process()
+        // runs. Clean all output buffers so only our partial HTML reaches the browser.
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        if (!headers_sent()) {
+            header('Content-Type: text/html; charset=UTF-8');
+        }
+        echo $html;
+        exit;
     }
 
     private function renderAlert(string $type, string $html): string
