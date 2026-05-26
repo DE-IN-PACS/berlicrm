@@ -4,29 +4,29 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
     private array  $debugLog = [];
     private string $logFile  = '';
 
-    public function process(Vtiger_Request $request): string
+    public function process(Vtiger_Request $request)
     {
-        ob_start();
+        error_log('RMMDevices_InRelation_View::process CALLED record=' . $request->get('record'));
 
         $accountId = (int) $request->get('record');
         $this->log("=== RMM Tab | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
 
         [$rmm_url, $rmm_token, $configError] = $this->loadConfig();
-        echo '<div class="relatedContainer" style="padding:12px">';
+        $html = '<div class="relatedContainer" style="padding:12px">';
 
         if ($configError) {
-            $this->renderAlert('warning', $configError);
-            $this->renderDebugPanel();
-            echo '</div>';
-            return ob_get_clean();
+            $html .= $this->renderAlert('warning', $configError);
+            $html .= $this->renderDebugPanel();
+            $html .= '</div>';
+            return $html;
         }
 
         $accountNo = $this->getAccountNo($accountId);
         if ($accountNo === null) {
-            $this->renderAlert('info', 'Keine Account-Nummer (account_no) für diesen Datensatz gefunden.');
-            $this->renderDebugPanel();
-            echo '</div>';
-            return ob_get_clean();
+            $html .= $this->renderAlert('info', 'Keine Account-Nummer (account_no) für diesen Datensatz gefunden.');
+            $html .= $this->renderDebugPanel();
+            $html .= '</div>';
+            return $html;
         }
         $this->log("account_no='{$accountNo}'");
 
@@ -58,10 +58,10 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             [$sitesData, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/clients/sites/', $rmm_token);
             if ($err !== null) {
                 $this->log("FEHLER /clients/sites/: {$err}");
-                $this->renderAlert('danger', 'TacticalRMM /clients/sites/ nicht erreichbar: ' . htmlspecialchars($err));
-                $this->renderDebugPanel();
-                echo '</div>';
-                return ob_get_clean();
+                $html .= $this->renderAlert('danger', 'TacticalRMM /clients/sites/ nicht erreichbar: ' . htmlspecialchars($err));
+                $html .= $this->renderDebugPanel();
+                $html .= '</div>';
+                return $html;
             }
             $siteList = $sitesData['results'] ?? $sitesData;
             $this->log("Sites geladen: " . count((array)$siteList));
@@ -84,10 +84,10 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             [$clientsData, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/clients/', $rmm_token);
             if ($err !== null) {
                 $this->log("FEHLER /clients/: {$err}");
-                $this->renderAlert('danger', 'TacticalRMM /clients/ nicht erreichbar: ' . htmlspecialchars($err));
-                $this->renderDebugPanel();
-                echo '</div>';
-                return ob_get_clean();
+                $html .= $this->renderAlert('danger', 'TacticalRMM /clients/ nicht erreichbar: ' . htmlspecialchars($err));
+                $html .= $this->renderDebugPanel();
+                $html .= '</div>';
+                return $html;
             }
             $clientList = $clientsData['results'] ?? $clientsData;
             $this->log("Clients geladen: " . count((array)$clientList));
@@ -105,12 +105,12 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
 
         if ($trmClientId === null) {
             $this->log("Kein Match für berlicrm_id='{$accountNo}'");
-            $this->renderAlert('warning',
+            $html .= $this->renderAlert('warning',
                 'Kein TacticalRMM-Client verknüpft (berlicrm_id = <strong>'
                 . htmlspecialchars($accountNo) . '</strong> nicht gefunden).');
-            $this->renderDebugPanel();
-            echo '</div>';
-            return ob_get_clean();
+            $html .= $this->renderDebugPanel();
+            $html .= '</div>';
+            return $html;
         }
 
         // ── Step 3: Agents laden ─────────────────────────────────────────────
@@ -125,19 +125,19 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         [$agentsData, $err] = $this->rmmGet($agentsUrl, $rmm_token);
         if ($err !== null) {
             $this->log("FEHLER Agents: {$err}");
-            $this->renderAlert('danger', 'Fehler beim Laden der Agents: ' . htmlspecialchars($err));
-            $this->renderDebugPanel();
-            echo '</div>';
-            return ob_get_clean();
+            $html .= $this->renderAlert('danger', 'Fehler beim Laden der Agents: ' . htmlspecialchars($err));
+            $html .= $this->renderDebugPanel();
+            $html .= '</div>';
+            return $html;
         }
         $agentList = $agentsData['results'] ?? $agentsData;
         $this->log("Agents geladen: " . count((array)$agentList));
 
-        $this->renderTable((array)$agentList);
-        $this->renderDebugPanel();
-        echo '</div>';
+        $html .= $this->renderTable((array)$agentList);
+        $html .= $this->renderDebugPanel();
+        $html .= '</div>';
 
-        return ob_get_clean();
+        return $html;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -187,11 +187,11 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         @file_put_contents($this->logFile, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
     }
 
-    private function renderDebugPanel(): void
+    private function renderDebugPanel(): string
     {
         $id   = 'rmm-debug-' . uniqid();
         $text = implode("\n", array_map('htmlspecialchars', $this->debugLog));
-        echo <<<HTML
+        return <<<HTML
 <div style="margin-top:14px">
   <button onclick="var p=document.getElementById('{$id}');p.style.display=p.style.display==='none'?'block':'none'"
           style="font-size:11px;padding:3px 8px;cursor:pointer;background:#f0f0f0;border:1px solid #ccc;border-radius:3px">
@@ -225,19 +225,18 @@ HTML;
         return trim($row['account_no']);
     }
 
-    private function renderTable(array $list): void
+    private function renderTable(array $list): string
     {
         if (empty($list)) {
-            $this->renderAlert('info', 'Keine Agents für diesen Client gefunden.');
-            return;
+            return $this->renderAlert('info', 'Keine Agents für diesen Client gefunden.');
         }
 
-        echo '<table class="table table-bordered listViewEntriesTable" style="width:100%;border-collapse:collapse;font-size:13px">';
-        echo '<thead><tr class="listViewHeaders" style="background:#f5f5f5">';
+        $html  = '<table class="table table-bordered listViewEntriesTable" style="width:100%;border-collapse:collapse;font-size:13px">';
+        $html .= '<thead><tr class="listViewHeaders" style="background:#f5f5f5">';
         foreach (['Hostname', 'Status', 'OS', 'Letzter Kontakt', 'CPU %', 'RAM %'] as $col) {
-            echo '<th style="padding:6px 10px;text-align:left;border:1px solid #ddd">' . htmlspecialchars($col) . '</th>';
+            $html .= '<th style="padding:6px 10px;text-align:left;border:1px solid #ddd">' . htmlspecialchars($col) . '</th>';
         }
-        echo '</tr></thead><tbody>';
+        $html .= '</tr></thead><tbody>';
 
         foreach ($list as $agent) {
             if (!is_array($agent)) continue;
@@ -249,21 +248,22 @@ HTML;
             $ram         = isset($agent['used_ram']) ? (int)$agent['used_ram'] : null;
 
             [$statusLabel, $statusStyle] = $this->statusLabel($rawStatus);
-            $cpuHtml = $cpu !== null ? '<span style="' . $this->trafficLight($cpu) . '">' . $cpu . ' %</span>' : '<span style="color:#999">–</span>';
-            $ramHtml = $ram !== null ? '<span style="' . $this->trafficLight($ram) . '">' . $ram . ' %</span>' : '<span style="color:#999">–</span>';
+            $cpuHtml = $cpu !== null ? '<span style="' . $this->trafficLight($cpu) . '">' . $cpu . ' %</span>' : '<span style="color:#999">&#8211;</span>';
+            $ramHtml = $ram !== null ? '<span style="' . $this->trafficLight($ram) . '">' . $ram . ' %</span>' : '<span style="color:#999">&#8211;</span>';
 
-            echo '<tr class="listViewEntries" style="border-bottom:1px solid #eee">';
-            echo '<td style="padding:5px 10px;border:1px solid #ddd">' . $hostname . '</td>';
-            echo '<td style="padding:5px 10px;border:1px solid #ddd"><span style="' . $statusStyle . '">' . $statusLabel . '</span></td>';
-            echo '<td style="padding:5px 10px;border:1px solid #ddd">' . $os . '</td>';
-            echo '<td style="padding:5px 10px;border:1px solid #ddd">' . $lastContact . '</td>';
-            echo '<td style="padding:5px 10px;border:1px solid #ddd;text-align:center">' . $cpuHtml . '</td>';
-            echo '<td style="padding:5px 10px;border:1px solid #ddd;text-align:center">' . $ramHtml . '</td>';
-            echo '</tr>';
+            $html .= '<tr class="listViewEntries" style="border-bottom:1px solid #eee">';
+            $html .= '<td style="padding:5px 10px;border:1px solid #ddd">' . $hostname . '</td>';
+            $html .= '<td style="padding:5px 10px;border:1px solid #ddd"><span style="' . $statusStyle . '">' . $statusLabel . '</span></td>';
+            $html .= '<td style="padding:5px 10px;border:1px solid #ddd">' . $os . '</td>';
+            $html .= '<td style="padding:5px 10px;border:1px solid #ddd">' . $lastContact . '</td>';
+            $html .= '<td style="padding:5px 10px;border:1px solid #ddd;text-align:center">' . $cpuHtml . '</td>';
+            $html .= '<td style="padding:5px 10px;border:1px solid #ddd;text-align:center">' . $ramHtml . '</td>';
+            $html .= '</tr>';
         }
 
-        echo '</tbody></table>';
-        echo '<div style="font-size:11px;color:#999;margin-top:6px">' . count($list) . ' Agent(s) geladen</div>';
+        $html .= '</tbody></table>';
+        $html .= '<div style="font-size:11px;color:#999;margin-top:6px">' . count($list) . ' Agent(s) geladen</div>';
+        return $html;
     }
 
     private function statusLabel(string $status): array
@@ -272,7 +272,7 @@ HTML;
             'online'  => ['Online',  'color:#2e7d32;font-weight:bold'],
             'offline' => ['Offline', 'color:#c62828;font-weight:bold'],
             'overdue' => ['Overdue', 'color:#e65100;font-weight:bold'],
-            default   => [htmlspecialchars($status) ?: '–', 'color:#555'],
+            default   => [htmlspecialchars($status) ?: '&#8211;', 'color:#555'],
         };
     }
 
@@ -283,7 +283,7 @@ HTML;
         return 'color:#2e7d32';
     }
 
-    private function renderAlert(string $type, string $html): void
+    private function renderAlert(string $type, string $html): string
     {
         $colors = [
             'info'    => ['#d1ecf1', '#0c5460', '#bee5eb'],
@@ -291,6 +291,6 @@ HTML;
             'danger'  => ['#f8d7da', '#721c24', '#f5c6cb'],
         ];
         [$bg, $fg, $border] = $colors[$type] ?? $colors['info'];
-        echo '<div style="background:' . $bg . ';color:' . $fg . ';border:1px solid ' . $border . ';padding:10px 14px;border-radius:4px;margin:8px 0">' . $html . '</div>';
+        return '<div style="background:' . $bg . ';color:' . $fg . ';border:1px solid ' . $border . ';padding:10px 14px;border-radius:4px;margin:8px 0">' . $html . '</div>';
     }
 }
