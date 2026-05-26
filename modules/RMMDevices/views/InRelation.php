@@ -1,13 +1,13 @@
 <?php
-require_once 'modules/Vtiger/views/Basic.php';
-
-class RMMDevices_InRelation_View extends Vtiger_Index_View {
+class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
 
     private array  $debugLog = [];
     private string $logFile  = '';
 
-    public function process(Vtiger_Request $request): void
+    public function process(Vtiger_Request $request): string
     {
+        ob_start();
+
         $accountId = (int) $request->get('record');
         $this->log("=== RMM Tab | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
 
@@ -18,7 +18,7 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
             $this->renderAlert('warning', $configError);
             $this->renderDebugPanel();
             echo '</div>';
-            return;
+            return ob_get_clean();
         }
 
         $accountNo = $this->getAccountNo($accountId);
@@ -26,11 +26,11 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
             $this->renderAlert('info', 'Keine Account-Nummer (account_no) für diesen Datensatz gefunden.');
             $this->renderDebugPanel();
             echo '</div>';
-            return;
+            return ob_get_clean();
         }
         $this->log("account_no='{$accountNo}'");
 
-        // ── Schritt 1: Custom Field-Definitionen ─────────────────────────────
+        // ── Step 1: Custom Field-Definitionen ────────────────────────────────
         [$cfDefs, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/core/customfields/', $rmm_token);
         $siteFieldIds   = [];
         $clientFieldIds = [];
@@ -48,11 +48,11 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         }
         $this->log("fieldIds: client=[" . implode(',', $clientFieldIds) . "] site=[" . implode(',', $siteFieldIds) . "]");
 
-        // ── Schritt 2: Verknüpften Client/Site finden ────────────────────────
+        // ── Step 2: Verknüpften Client/Site finden ───────────────────────────
         $trmClientId = null;
         $trmSiteId   = null;
 
-        // 2a: Site-Suche direkt über /clients/sites/ (NICHT über /clients/)
+        // 2a: Site-Suche direkt über /clients/sites/
         if (!empty($siteFieldIds)) {
             $this->log("Suche in /clients/sites/ (siteFieldIds=[" . implode(',', $siteFieldIds) . "])");
             [$sitesData, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/clients/sites/', $rmm_token);
@@ -61,7 +61,7 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
                 $this->renderAlert('danger', 'TacticalRMM /clients/sites/ nicht erreichbar: ' . htmlspecialchars($err));
                 $this->renderDebugPanel();
                 echo '</div>';
-                return;
+                return ob_get_clean();
             }
             $siteList = $sitesData['results'] ?? $sitesData;
             $this->log("Sites geladen: " . count((array)$siteList));
@@ -87,7 +87,7 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
                 $this->renderAlert('danger', 'TacticalRMM /clients/ nicht erreichbar: ' . htmlspecialchars($err));
                 $this->renderDebugPanel();
                 echo '</div>';
-                return;
+                return ob_get_clean();
             }
             $clientList = $clientsData['results'] ?? $clientsData;
             $this->log("Clients geladen: " . count((array)$clientList));
@@ -110,10 +110,10 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
                 . htmlspecialchars($accountNo) . '</strong> nicht gefunden).');
             $this->renderDebugPanel();
             echo '</div>';
-            return;
+            return ob_get_clean();
         }
 
-        // ── Schritt 3: Agents laden ──────────────────────────────────────────
+        // ── Step 3: Agents laden ─────────────────────────────────────────────
         if ($trmSiteId !== null) {
             $agentsUrl = rtrim($rmm_url, '/') . '/agents/?site=' . $trmSiteId;
             $this->log("GET {$agentsUrl}");
@@ -128,7 +128,7 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
             $this->renderAlert('danger', 'Fehler beim Laden der Agents: ' . htmlspecialchars($err));
             $this->renderDebugPanel();
             echo '</div>';
-            return;
+            return ob_get_clean();
         }
         $agentList = $agentsData['results'] ?? $agentsData;
         $this->log("Agents geladen: " . count((array)$agentList));
@@ -136,6 +136,8 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         $this->renderTable((array)$agentList);
         $this->renderDebugPanel();
         echo '</div>';
+
+        return ob_get_clean();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -145,7 +147,7 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         if (!isset($cf['value'])) return false;
         if (strtolower(trim((string)$cf['value'])) !== strtolower(trim($accountNo))) return false;
         if (!isset($cf['field'])) return false;
-        if (empty($fieldIds)) return true; // Fallback: Wert-Match allein
+        if (empty($fieldIds)) return true;
         if (is_numeric($cf['field'])) return in_array((int)$cf['field'], $fieldIds, true);
         return strtolower(trim((string)$cf['field'])) === 'berlicrm_id';
     }
@@ -178,9 +180,11 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         $this->debugLog[] = $line;
         if ($this->logFile === '') {
             $root = realpath(__DIR__ . '/../../..');
-            $this->logFile = $root . DIRECTORY_SEPARATOR . 'logs' . DIRECTORY_SEPARATOR . 'rmm_debug.log';
+            $dir  = ($root !== false ? $root : __DIR__ . '/../../..') . DIRECTORY_SEPARATOR . 'logs';
+            if (!is_dir($dir)) @mkdir($dir, 0755, true);
+            $this->logFile = $dir . DIRECTORY_SEPARATOR . 'rmm_debug.log';
         }
-        file_put_contents($this->logFile, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
+        @file_put_contents($this->logFile, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
     }
 
     private function renderDebugPanel(): void
@@ -191,7 +195,7 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
 <div style="margin-top:14px">
   <button onclick="var p=document.getElementById('{$id}');p.style.display=p.style.display==='none'?'block':'none'"
           style="font-size:11px;padding:3px 8px;cursor:pointer;background:#f0f0f0;border:1px solid #ccc;border-radius:3px">
-    ▶ Debug-Log ein-/ausblenden
+    &#9658; Debug-Log ein-/ausblenden
   </button>
   <pre id="{$id}" style="display:none;margin-top:6px;padding:10px;background:#1e1e1e;color:#d4d4d4;
        font-size:11px;line-height:1.5;border-radius:4px;overflow:auto;max-height:320px;white-space:pre-wrap">{$text}</pre>
