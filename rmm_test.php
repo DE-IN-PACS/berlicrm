@@ -132,7 +132,15 @@ echo '<hr><h2>Schritt 3: GET /api/v3/clients/</h2>';
 
 echo "<p>HTTP-Status: <b class='" . ($httpCode >= 200 && $httpCode < 300 ? 'ok' : 'err') . "'>{$httpCode}</b></p>";
 if ($err) {
-    echo "<p class='err'>Fehler: " . htmlspecialchars($err) . "</p>";
+    // HTML-Antwort statt JSON → typisch bei falschem/abgelaufenem API-Token
+    if (stripos($rawBody, '<!DOCTYPE') !== false || stripos($rawBody, '<html') !== false) {
+        echo "<p class='err'><b>Der Server hat eine HTML-Seite zurückgegeben statt JSON.</b><br>"
+           . "Mögliche Ursachen:<br>"
+           . "&nbsp;1. API-Token ungültig oder abgelaufen → TacticalRMM: Settings → API Keys → Token prüfen/neu erstellen<br>"
+           . "&nbsp;2. Nginx leitet /api/v3/ nicht zur Django-API weiter (Reverse-Proxy-Problem)</p>";
+    } else {
+        echo "<p class='err'>Fehler: " . htmlspecialchars($err) . "</p>";
+    }
     echo "<p>Raw Body (erste 500 Zeichen):</p><pre>" . htmlspecialchars(substr($rawBody, 0, 500)) . "</pre>";
     die('</body></html>');
 }
