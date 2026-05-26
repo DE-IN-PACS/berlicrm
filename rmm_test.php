@@ -6,6 +6,12 @@
  *
  * Löschen nach Diagnose!
  */
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+set_time_limit(120);
+ini_set('memory_limit', '256M');
+ob_implicit_flush(true);
+if (ob_get_level()) ob_end_clean();
 
 // ── Bootstrap: Direkte PDO-Verbindung über vtiger-Config ─────────────────────
 chdir(__DIR__);
@@ -169,9 +175,12 @@ if ($cfErr) {
     }
 }
 
+flush();
+
 // ── 4. API-Call 1: Clients ───────────────────────────────────────────────────
-echo '<hr><h2>Schritt 4: GET /clients/</h2>';
-[$clientsData, $err, $httpCode, $rawBody] = rmm_get($rmmUrl . '/clients/', $rmmToken);
+echo '<hr><h2>Schritt 4: GET /clients/ (kann einige Sekunden dauern…)</h2>';
+flush();
+[$clientsData, $err, $httpCode, $rawBody] = rmm_get($rmmUrl . '/clients/', $rmmToken, 30);
 
 echo "<p>HTTP-Status: <b class='" . ($httpCode >= 200 && $httpCode < 300 ? 'ok' : 'err') . "'>{$httpCode}</b></p>";
 if ($err) {
@@ -377,12 +386,12 @@ echo '<p class="warn">⚠ rmm_test.php nach der Diagnose löschen!</p>';
 echo '</body></html>';
 
 // ── Helper ───────────────────────────────────────────────────────────────────
-function rmm_get(string $url, string $token): array
+function rmm_get(string $url, string $token, int $timeout = 30): array
 {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 10,
+        CURLOPT_TIMEOUT        => $timeout,
         CURLOPT_HTTPHEADER     => ['X-API-KEY: ' . $token, 'Content-Type: application/json'],
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
