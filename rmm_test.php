@@ -336,3 +336,39 @@ function rmm_get(string $url, string $token): array
     }
     return [$data, null, $httpCode, (string) $body];
 }
+
+/**
+ * Prüft ob ein custom_field-Eintrag zur gesuchten Account-Nummer passt.
+ *
+ * @param array  $f         Ein Eintrag aus custom_fields (keys: field, value, ...)
+ * @param array  $fieldIds  Bekannte numerische IDs für "berlicrm_id" aus /core/customfields/
+ * @param string $accountNo Die gesuchte Account-Nummer (z.B. "ACC27")
+ */
+function rmm_match_field(array $f, array $fieldIds, string $accountNo): bool
+{
+    // Wert muss (case-insensitiv, ohne Leerzeichen) übereinstimmen
+    if (!isset($f['value'])) {
+        return false;
+    }
+    if (strtolower(trim((string) $f['value'])) !== strtolower(trim($accountNo))) {
+        return false;
+    }
+
+    // Kein field-Key vorhanden → kein Match
+    if (!isset($f['field'])) {
+        return false;
+    }
+
+    // Keine bekannten Field-IDs → Fallback: Wert-Match allein genügt (mit Warnung)
+    if (empty($fieldIds)) {
+        return true;
+    }
+
+    // Numerische field-ID → per in_array prüfen
+    if (is_numeric($f['field'])) {
+        return in_array((int) $f['field'], $fieldIds, true);
+    }
+
+    // String-Wert → Kompatibilität mit älteren TRMM-Versionen
+    return strtolower(trim((string) $f['field'])) === 'berlicrm_id';
+}
