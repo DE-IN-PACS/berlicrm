@@ -73,11 +73,11 @@ if ($pdo === null) {
 }
 echo "<p class='ok'>Datenbankverbindung OK ({$dbname}@{$host})</p><hr>";
 
-// ── 1. record-Parameter ──────────────────────────────────────────────────────
-$accountId = isset($_GET['record']) ? (int) $_GET['record'] : 0;
-if (!$accountId) {
-    echo '<p class="warn">Bitte URL-Parameter angeben: <b>?record=&lt;accountid&gt;</b><br>';
-    echo 'Beispiel: rmm_test.php?record=74</p>';
+// ── 1. record-Parameter (account_no ODER numerische accountid) ───────────────
+$param = isset($_GET['record']) ? trim($_GET['record']) : '';
+if ($param === '') {
+    echo '<p class="warn">Bitte URL-Parameter angeben: <b>?record=&lt;account_no oder accountid&gt;</b><br>';
+    echo 'Beispiele: rmm_test.php?record=ACC27 &nbsp;|&nbsp; rmm_test.php?record=101</p>';
 
     $rows = db_all($pdo, 'SELECT accountid, accountname, account_no FROM vtiger_account ORDER BY accountname LIMIT 20');
     echo '<p>Verfügbare Accounts (erste 20):</p><pre>';
@@ -88,18 +88,22 @@ if (!$accountId) {
     exit;
 }
 
-echo "<h2>Account-ID: {$accountId}</h2><hr>";
-
-// ── 2. account_no aus vtiger_account ────────────────────────────────────────
-echo '<h2>Schritt 1: account_no aus vtiger_account</h2>';
-$row = db_row($pdo, 'SELECT accountid, accountname, account_no FROM vtiger_account WHERE accountid = ?', [$accountId]);
+// Suche per account_no (Text) oder accountid (Zahl)
+echo '<h2>Schritt 1: Account aus vtiger_account</h2>';
+if (is_numeric($param)) {
+    $row = db_row($pdo, 'SELECT accountid, accountname, account_no FROM vtiger_account WHERE accountid = ?', [(int)$param]);
+} else {
+    $row = db_row($pdo, 'SELECT accountid, accountname, account_no FROM vtiger_account WHERE account_no = ?', [$param]);
+}
 if (!$row) {
-    echo "<p class='err'>Kein Account mit accountid={$accountId} gefunden.</p>";
+    echo "<p class='err'>Kein Account mit record=" . htmlspecialchars($param) . " gefunden.</p>";
     die('</body></html>');
 }
+$accountId   = (int) $row['accountid'];
 $accountNo   = trim((string) $row['account_no']);
 $accountName = $row['accountname'];
-echo "<p class='ok'>Name: <b>{$accountName}</b> | account_no: <b>" . htmlspecialchars($accountNo) . "</b></p>";
+echo "<h2>Account: " . htmlspecialchars($accountName) . "</h2><hr>";
+echo "<p class='ok'>accountid: <b>{$accountId}</b> | account_no: <b>" . htmlspecialchars($accountNo) . "</b></p>";
 if ($accountNo === '') {
     echo "<p class='err'>account_no ist leer – Tab würde 'Keine Account-Nummer' anzeigen.</p>";
     die('</body></html>');
