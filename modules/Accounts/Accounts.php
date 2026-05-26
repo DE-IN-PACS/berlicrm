@@ -1481,6 +1481,13 @@ class Accounts extends CRMEntity {
 		}
 		return $entityIds;
 	}
+
+	// Placeholder for TacticalRMM related tab – actual data is loaded live via
+	// modules/RMMDevices/views/InRelation.php. This stub is required because
+	// vtiger calls $accountsFocus->get_rmmdevices() to compute the tab badge count.
+	function get_rmmdevices($id, $cur_tab_id, $rel_tab_id, $actions = false) {
+		return ['query' => 'SELECT vtiger_crmentity.crmid FROM vtiger_crmentity WHERE 0=1'];
+	}
 }
 
 ?>
