@@ -81,14 +81,9 @@ Vtiger_Base_Validator_Js("Vtiger_PositiveNumber_Validator_Js",{
 	 */
 	validate: function(){
 		var fieldValue = this.getFieldValue();
-		var negativeRegex= /(^[-]+\d+)$/ ;
 
 		if(isNaN(fieldValue)) {
 			this.setError(app.vtranslate('JS_CONTAINS_ILLEGAL_CHARACTERS'));
-			return false;			
-		}
-		if(fieldValue < 0 || fieldValue.match(negativeRegex)){
-			this.setError(app.vtranslate('JS_ACCEPT_POSITIVE_NUMBER'));
 			return false;
 		}
 		return true;
@@ -641,11 +636,6 @@ Vtiger_Base_Validator_Js('Vtiger_Currency_Validator_Js',{
 		}*/
 		if(isNaN(strippedValue)){
 			errorInfo = app.vtranslate('JS_CONTAINS_ILLEGAL_CHARACTERS');
-			this.setError(errorInfo);
-			return false;
-		}
-		if(strippedValue < 0){
-			errorInfo = app.vtranslate('JS_ACCEPT_POSITIVE_NUMBER');
 			this.setError(errorInfo);
 			return false;
 		}
