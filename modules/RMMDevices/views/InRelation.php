@@ -4,7 +4,7 @@ require_once 'modules/Vtiger/views/Basic.php';
 class RMMDevices_InRelation_View extends Vtiger_Index_View {
 
     private array  $debugLog = [];
-    private string $logFile  = 'logs/rmm_debug.log';
+    private string $logFile  = '';
 
     public function process(Vtiger_Request $request): void
     {
@@ -110,7 +110,19 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
     private function log(string $line): void
     {
         $this->debugLog[] = $line;
-        @file_put_contents($this->logFile, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
+
+        if ($this->logFile === '') {
+            // __DIR__ = .../modules/RMMDevices/views  →  drei Ebenen hoch = berliCRM-Root
+            $this->logFile = realpath(__DIR__ . '/../../..') . DIRECTORY_SEPARATOR
+                           . 'logs' . DIRECTORY_SEPARATOR . 'rmm_debug.log';
+        }
+
+        $written = file_put_contents($this->logFile, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
+        if ($written === false && count($this->debugLog) === 1) {
+            // Schreiben fehlgeschlagen – Pfad + Fehler in den Debug-Buffer aufnehmen
+            $this->debugLog[] = '[LOG-FEHLER] Konnte nicht in "' . $this->logFile
+                . '" schreiben. PHP-Fehler: ' . error_get_last()['message'] ?? 'unbekannt';
+        }
     }
 
     private function renderDebugPanel(): void
