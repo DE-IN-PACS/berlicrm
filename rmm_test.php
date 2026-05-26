@@ -191,6 +191,17 @@ if ($err) {
 $clientList = isset($clientsData['results']) ? $clientsData['results'] : $clientsData;
 echo "<p class='ok'>Anzahl Clients: <b>" . count($clientList) . "</b></p>";
 
+// Raw-Dump des ersten Clients – zeigt ob eingebettete Sites custom_fields enthalten
+if (!empty($clientList)) {
+    $first = $clientList[0];
+    $firstSites = $first['sites'] ?? [];
+    $firstSiteHasCF = !empty($firstSites) && isset($firstSites[0]['custom_fields']);
+    echo '<p>Erster Client (id=' . ($first['id'] ?? '?') . ') – eingebettete Sites: '
+        . count($firstSites) . ', erste Site hat custom_fields: '
+        . '<b class="' . ($firstSiteHasCF ? 'ok' : 'warn') . '">'
+        . ($firstSiteHasCF ? 'JA' : 'NEIN – GET /clients/sites/ wird als Fallback genutzt') . '</b></p>';
+}
+
 echo '<p>Alle Clients + Custom Fields + eingebettete Sites:</p><pre>';
 $foundClientId = null;
 $foundSiteId   = null;
@@ -251,6 +262,43 @@ foreach ($clientList as $i => $client) {
     echo "\n";
 }
 echo '</pre>';
+
+// ── Fallback: GET /clients/sites/ falls Sites im Client-Response keine custom_fields hatten ──
+if (!$foundClientId && !empty($siteFieldIds)) {
+    echo '<hr><h2>Schritt 4b: Fallback GET /clients/sites/ (Sites haben eigene custom_fields)</h2>';
+    [$sitesData, $sErr, $sCode, $sBody] = rmm_get($rmmUrl . '/clients/sites/', $rmmToken);
+    echo "<p>HTTP-Status: <b class='" . ($sCode >= 200 && $sCode < 300 ? 'ok' : 'err') . "'>{$sCode}</b></p>";
+    if (!$sErr) {
+        $siteList = isset($sitesData['results']) ? $sitesData['results'] : $sitesData;
+        echo "<p class='ok'>Anzahl Sites: <b>" . count($siteList) . "</b></p>";
+        echo '<pre>';
+        foreach ($siteList as $si => $site) {
+            $sid     = $site['id']     ?? '?';
+            $sname   = $site['name']   ?? "#{$si}";
+            $sclient = $site['client'] ?? '?';
+            $sfields = $site['custom_fields'] ?? [];
+            $sfStr   = [];
+            foreach ($sfields as $sf) {
+                $sfn = $sf['field'] ?? '(?)';
+                $sfv = $sf['value'] ?? '(?)';
+                $smatch = rmm_match_field($sf, $siteFieldIds, $accountNo);
+                if ($smatch && $foundClientId === null) {
+                    $foundSiteId   = (int) $sid;
+                    $foundClientId = (int) $sclient;
+                    $matchLevel    = 'site';
+                }
+                $sfStr[] = ($smatch ? '>>>' : '   ') . " field={$sfn} value=" . htmlspecialchars((string)$sfv);
+            }
+            $siteMarker = ($foundSiteId === (int)$sid) ? " ← SITE-MATCH" : '';
+            echo "Site[{$si}] id={$sid}  client_id={$sclient}  name=" . htmlspecialchars($sname) . $siteMarker . "\n";
+            echo ($sfStr ? implode("\n", $sfStr) : '   (keine custom_fields)') . "\n\n";
+        }
+        echo '</pre>';
+    } else {
+        echo "<p class='err'>" . htmlspecialchars($sErr) . "</p>";
+        echo "<pre>" . htmlspecialchars(substr($sBody, 0, 300)) . "</pre>";
+    }
+}
 
 if (!$foundClientId) {
     echo "<p class='err'>Kein Client/Site mit <b>berlicrm_id=" . htmlspecialchars($accountNo) . "</b> gefunden.</p>";

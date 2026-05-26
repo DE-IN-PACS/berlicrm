@@ -143,6 +143,36 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
             }
         }
 
+        // ── Fallback: GET /clients/sites/ falls Sites im Client-Response keine custom_fields hatten ──
+        if ($trmClientId === null && !empty($siteFieldIds)) {
+            $urlSites = rtrim($rmm_url, '/') . '/clients/sites/';
+            $this->log("Fallback API-Call: GET {$urlSites}");
+            [$sitesData, $sErr] = $this->apiGet($urlSites, $rmm_token);
+            if ($sErr === null) {
+                $siteList = isset($sitesData['results']) ? $sitesData['results'] : $sitesData;
+                $this->log("Fallback OK | Anzahl Sites: " . count($siteList));
+                foreach ($siteList as $sidx => $site) {
+                    $siteId   = (int) ($site['id']     ?? 0);
+                    $siteName = $site['name'] ?? "#{$sidx}";
+                    $clientId = (int) ($site['client'] ?? 0);
+                    $sfSummary = [];
+                    foreach ((array) ($site['custom_fields'] ?? []) as $sf) {
+                        $sfSummary[] = "field=" . ($sf['field'] ?? '?') . " value=" . htmlspecialchars((string)($sf['value'] ?? ''));
+                        if ($this->matchField($sf, $siteFieldIds, $accountNo)) {
+                            $trmSiteId   = $siteId;
+                            $trmClientId = $clientId;
+                        }
+                    }
+                    $this->log("  Site[{$sidx}] id={$siteId} client_id={$clientId} name='{$siteName}'"
+                        . ' | custom_fields=[' . implode(', ', $sfSummary ?: ['–']) . ']'
+                        . ($trmSiteId === $siteId ? ' ← MATCH (fallback sites endpoint)' : ''));
+                    if ($trmClientId !== null) break;
+                }
+            } else {
+                $this->log("Fallback fehlgeschlagen: {$sErr}");
+            }
+        }
+
         if ($trmClientId === null) {
             $this->log("ABBRUCH: kein Client/Site mit berlicrm_id='{$accountNo}' gefunden"
                 . " | clientFieldIds=[" . implode(',', $clientFieldIds) . "]"
