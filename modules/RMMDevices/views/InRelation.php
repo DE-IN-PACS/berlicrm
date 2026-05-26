@@ -3,59 +3,132 @@ require_once 'modules/Vtiger/views/Basic.php';
 
 class RMMDevices_InRelation_View extends Vtiger_Index_View {
 
+    private array  $debugLog = [];
+    private string $logFile  = 'logs/rmm_debug.log';
+
     public function process(Vtiger_Request $request): void
     {
         $accountId = (int) $request->get('record');
+        $this->log("=== RMM Tab geöffnet | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
 
         [$rmm_url, $rmm_token, $configError] = $this->loadConfig();
 
         echo '<div class="relatedContainer" style="padding:12px">';
 
         if ($configError) {
+            $this->log("FEHLER Konfiguration: {$configError}");
             $this->renderAlert('warning', $configError);
+            $this->renderDebugPanel();
             echo '</div>';
             return;
         }
+        $this->log("Konfiguration OK | rmm_url={$rmm_url}");
 
-        $rmmClientId = $this->fetchRmmClientId($accountId);
-
-        if ($rmmClientId === null) {
+        $accountNo = $this->fetchRmmClientId($accountId);
+        if ($accountNo === null) {
+            $this->log("ABBRUCH: account_no leer oder nicht gefunden");
             $this->renderAlert('info', 'Keine Account-Nummer (account_no) für diesen Datensatz gefunden.');
+            $this->renderDebugPanel();
             echo '</div>';
             return;
         }
+        $this->log("account_no gefunden: '{$accountNo}'");
 
-        [$clients, $err] = $this->apiGet(rtrim($rmm_url, '/') . '/api/v3/clients/', $rmm_token);
+        // ── API-Call 1: alle Clients ────────────────────────────────────────
+        $url1 = rtrim($rmm_url, '/') . '/api/v3/clients/';
+        $this->log("API-Call 1: GET {$url1}");
+        [$clients, $err] = $this->apiGet($url1, $rmm_token);
         if ($err !== null) {
+            $this->log("FEHLER API-Call 1: {$err}");
             $this->renderAlert('danger', 'TacticalRMM API nicht erreichbar: ' . htmlspecialchars($err));
+            $this->renderDebugPanel();
             echo '</div>';
             return;
         }
+        $list = isset($clients['results']) ? $clients['results'] : $clients;
+        $this->log("API-Call 1 OK | Anzahl Clients: " . count($list));
 
-        $trmClientId = $this->findTrmClient($clients, $rmmClientId);
+        // ── Client-Suche ────────────────────────────────────────────────────
+        $trmClientId = null;
+        foreach ($list as $idx => $client) {
+            $clientName   = $client['name'] ?? "#{$idx}";
+            $clientId     = $client['id']   ?? '?';
+            $fields       = $client['custom_fields'] ?? [];
+            $fieldSummary = [];
+            foreach ($fields as $f) {
+                $fn = $f['field']       ?? '(kein field-Key)';
+                $fv = $f['value']       ?? '(kein value-Key)';
+                $fieldSummary[] = "{$fn}={$fv}";
+                if (
+                    isset($f['field'], $f['value'])
+                    && strtolower((string) $f['field']) === 'berlicrm_id'
+                    && (string) $f['value'] === $accountNo
+                ) {
+                    $trmClientId = (int) $clientId;
+                }
+            }
+            $this->log(
+                "  Client[{$idx}] id={$clientId} name='{$clientName}'"
+                . ' | custom_fields=[' . implode(', ', $fieldSummary ?: ['–']) . ']'
+                . ($trmClientId === (int) $clientId ? ' ← MATCH' : '')
+            );
+        }
+
         if ($trmClientId === null) {
+            $this->log("ABBRUCH: kein Client mit berlicrm_id='{$accountNo}' gefunden");
             $this->renderAlert('warning',
                 'Kein TacticalRMM-Client verknüpft (berlicrm_id = <strong>'
-                . htmlspecialchars($rmmClientId) . '</strong> nicht gefunden).');
+                . htmlspecialchars($accountNo) . '</strong> nicht gefunden).'
+                . ' Alle geprüften Clients und deren Custom Fields im Debug-Panel unten.');
+            $this->renderDebugPanel();
             echo '</div>';
             return;
         }
+        $this->log("Client gefunden: TacticalRMM client_id={$trmClientId}");
 
-        [$agents, $err] = $this->apiGet(
-            rtrim($rmm_url, '/') . '/api/v3/agents/?client=' . urlencode((string) $trmClientId),
-            $rmm_token
-        );
+        // ── API-Call 2: Agents ───────────────────────────────────────────────
+        $url2 = rtrim($rmm_url, '/') . '/api/v3/agents/?client=' . urlencode((string) $trmClientId);
+        $this->log("API-Call 2: GET {$url2}");
+        [$agents, $err] = $this->apiGet($url2, $rmm_token);
         if ($err !== null) {
+            $this->log("FEHLER API-Call 2: {$err}");
             $this->renderAlert('danger', 'Fehler beim Laden der Agents: ' . htmlspecialchars($err));
+            $this->renderDebugPanel();
             echo '</div>';
             return;
         }
+        $agentList = isset($agents['results']) ? $agents['results'] : $agents;
+        $this->log("API-Call 2 OK | Anzahl Agents: " . count($agentList));
 
         $this->renderTable($agents);
+        $this->renderDebugPanel();
         echo '</div>';
     }
 
     // ─── private helpers ──────────────────────────────────────────────────────
+
+    private function log(string $line): void
+    {
+        $this->debugLog[] = $line;
+        @file_put_contents($this->logFile, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
+    }
+
+    private function renderDebugPanel(): void
+    {
+        $id   = 'rmm-debug-' . uniqid();
+        $lines = array_map('htmlspecialchars', $this->debugLog);
+        $text  = implode("\n", $lines);
+        echo <<<HTML
+<div style="margin-top:14px">
+  <button onclick="var p=document.getElementById('{$id}');p.style.display=p.style.display==='none'?'block':'none'"
+          style="font-size:11px;padding:3px 8px;cursor:pointer;background:#f0f0f0;border:1px solid #ccc;border-radius:3px">
+    ▶ Debug-Log ein-/ausblenden
+  </button>
+  <pre id="{$id}" style="display:none;margin-top:6px;padding:10px;background:#1e1e1e;color:#d4d4d4;
+       font-size:11px;line-height:1.5;border-radius:4px;overflow:auto;max-height:320px;white-space:pre-wrap">{$text}</pre>
+</div>
+HTML;
+    }
 
     private function loadConfig(): array
     {
@@ -86,6 +159,7 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
 
     /**
      * Returns [decoded_array_or_null, error_string_or_null].
+     * Logs HTTP status and first 500 chars of response body.
      */
     private function apiGet(string $url, string $token): array
     {
@@ -99,57 +173,36 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
             ],
             CURLOPT_SSL_VERIFYPEER => false,
         ]);
-        $body = curl_exec($ch);
+        $body     = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlErr  = curl_error($ch);
         curl_close($ch);
+
+        $this->log("  → HTTP {$httpCode}"
+            . ($curlErr ? " | cURL-Fehler: {$curlErr}" : '')
+            . " | Body (erste 500 Zeichen): " . substr((string) $body, 0, 500));
 
         if ($body === false || $curlErr !== '') {
             return [null, $curlErr ?: 'cURL-Fehler'];
         }
         if ($httpCode < 200 || $httpCode >= 300) {
-            return [null, 'HTTP ' . $httpCode];
+            return [null, 'HTTP ' . $httpCode . ' – ' . substr((string) $body, 0, 200)];
         }
         $data = json_decode($body, true);
         if (!is_array($data)) {
-            return [null, 'Ungültige JSON-Antwort'];
+            return [null, 'Ungültige JSON-Antwort: ' . substr((string) $body, 0, 200)];
         }
         return [$data, null];
     }
 
-    /**
-     * Searches the TacticalRMM /api/v3/clients/ response for a client
-     * whose custom_fields contain berlicrm_id == $rmmClientId.
-     * Returns the TacticalRMM client id or null.
-     */
-    private function findTrmClient(array $clients, string $rmmClientId): ?int
-    {
-        // API returns either a plain array of clients or {"results": [...]}
-        $list = isset($clients['results']) ? $clients['results'] : $clients;
-        foreach ($list as $client) {
-            $fields = $client['custom_fields'] ?? [];
-            foreach ($fields as $field) {
-                if (
-                    isset($field['field'], $field['value'])
-                    && strtolower((string) $field['field']) === 'berlicrm_id'
-                    && (string) $field['value'] === $rmmClientId
-                ) {
-                    return (int) $client['id'];
-                }
-            }
-        }
-        return null;
-    }
-
     private function renderTable(array $agents): void
     {
-        if (empty($agents)) {
+        $list = isset($agents['results']) ? $agents['results'] : $agents;
+
+        if (empty($list)) {
             $this->renderAlert('info', 'Keine Agents für diesen Client gefunden.');
             return;
         }
-
-        // /api/v3/agents/ may return a plain array or {"results": [...]}
-        $list = isset($agents['results']) ? $agents['results'] : $agents;
 
         echo '<table class="table table-bordered listViewEntriesTable" '
             . 'style="width:100%;border-collapse:collapse;font-size:13px">';
@@ -162,12 +215,12 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         echo '</tr></thead><tbody>';
 
         foreach ($list as $agent) {
-            $hostname      = htmlspecialchars((string) ($agent['hostname']        ?? ''));
-            $rawStatus     = (string) ($agent['status']         ?? '');
-            $os            = htmlspecialchars((string) ($agent['operating_system'] ?? $agent['plat'] ?? ''));
-            $lastContact   = htmlspecialchars((string) ($agent['last_seen']        ?? $agent['last_alert_time'] ?? ''));
-            $cpu           = isset($agent['cpu_load'])  ? (int) $agent['cpu_load']  : null;
-            $ram           = isset($agent['used_ram'])  ? (int) $agent['used_ram']  : null;
+            $hostname    = htmlspecialchars((string) ($agent['hostname']         ?? ''));
+            $rawStatus   = (string) ($agent['status']          ?? '');
+            $os          = htmlspecialchars((string) ($agent['operating_system'] ?? $agent['plat'] ?? ''));
+            $lastContact = htmlspecialchars((string) ($agent['last_seen']        ?? $agent['last_alert_time'] ?? ''));
+            $cpu         = isset($agent['cpu_load']) ? (int) $agent['cpu_load'] : null;
+            $ram         = isset($agent['used_ram']) ? (int) $agent['used_ram'] : null;
 
             [$statusLabel, $statusStyle] = $this->statusDisplay($rawStatus);
 
@@ -194,7 +247,6 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
             . count($list) . ' Agent(s) geladen</div>';
     }
 
-    /** Returns [label, inline-style] for a TacticalRMM agent status string. */
     private function statusDisplay(string $status): array
     {
         return match (strtolower($status)) {
@@ -205,7 +257,6 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         };
     }
 
-    /** Returns an inline color style based on a percentage value (green/orange/red). */
     private function trafficLight(int $pct): string
     {
         if ($pct >= 90) return 'color:#c62828;font-weight:bold';
