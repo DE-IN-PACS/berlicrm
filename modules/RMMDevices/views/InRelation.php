@@ -35,7 +35,7 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         $this->log("account_no gefunden: '{$accountNo}'");
 
         // ── API-Call 1: alle Clients ────────────────────────────────────────
-        $url1 = rtrim($rmm_url, '/') . '/api/v3/clients/';
+        $url1 = rtrim($rmm_url, '/') . '/clients/';
         $this->log("API-Call 1: GET {$url1}");
         [$clients, $err] = $this->apiGet($url1, $rmm_token);
         if ($err !== null) {
@@ -89,7 +89,7 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         $this->log("Client gefunden: TacticalRMM client_id={$trmClientId}");
 
         // ── API-Call 2: Agents ───────────────────────────────────────────────
-        $url2 = rtrim($rmm_url, '/') . '/api/v3/agents/?client=' . urlencode((string) $trmClientId);
+        $url2 = rtrim($rmm_url, '/') . '/agents/?client_id=' . urlencode((string) $trmClientId);
         $this->log("API-Call 2: GET {$url2}");
         [$agents, $err] = $this->apiGet($url2, $rmm_token);
         if ($err !== null) {

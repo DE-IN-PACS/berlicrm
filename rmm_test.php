@@ -127,8 +127,8 @@ echo "<p class='ok'>rmm_url: <b>" . htmlspecialchars($rmmUrl) . "</b></p>";
 echo "<p class='ok'>rmm_token: <b>" . str_repeat('*', max(4, strlen($rmmToken) - 4)) . substr($rmmToken, -4) . "</b></p>";
 
 // ── 4. API-Call 1: Clients ───────────────────────────────────────────────────
-echo '<hr><h2>Schritt 3: GET /api/v3/clients/</h2>';
-[$clientsData, $err, $httpCode, $rawBody] = rmm_get($rmmUrl . '/api/v3/clients/', $rmmToken);
+echo '<hr><h2>Schritt 3: GET /clients/</h2>';
+[$clientsData, $err, $httpCode, $rawBody] = rmm_get($rmmUrl . '/clients/', $rmmToken);
 
 echo "<p>HTTP-Status: <b class='" . ($httpCode >= 200 && $httpCode < 300 ? 'ok' : 'err') . "'>{$httpCode}</b></p>";
 if ($err) {
@@ -185,8 +185,8 @@ if (!$foundClientId) {
 echo "<p class='ok'>Match gefunden: TacticalRMM client_id = <b>{$foundClientId}</b></p>";
 
 // ── 5. API-Call 2: Agents ────────────────────────────────────────────────────
-echo '<hr><h2>Schritt 4: GET /api/v3/agents/?client=' . $foundClientId . '</h2>';
-[$agentsData, $err, $httpCode, $rawBody] = rmm_get($rmmUrl . '/api/v3/agents/?client=' . $foundClientId, $rmmToken);
+echo '<hr><h2>Schritt 4: GET /agents/?client_id=' . $foundClientId . '</h2>';
+[$agentsData, $err, $httpCode, $rawBody] = rmm_get($rmmUrl . '/agents/?client_id=' . $foundClientId, $rmmToken);
 
 echo "<p>HTTP-Status: <b class='" . ($httpCode >= 200 && $httpCode < 300 ? 'ok' : 'err') . "'>{$httpCode}</b></p>";
 if ($err) {
