@@ -126,8 +126,51 @@ $rmmToken = $cfg['rmm_token'];
 echo "<p class='ok'>rmm_url: <b>" . htmlspecialchars($rmmUrl) . "</b></p>";
 echo "<p class='ok'>rmm_token: <b>" . str_repeat('*', max(4, strlen($rmmToken) - 4)) . substr($rmmToken, -4) . "</b></p>";
 
+// ── 3b. API-Call 0: Custom Field-Definitionen ────────────────────────────────
+echo '<hr><h2>Schritt 3: GET /core/customfields/</h2>';
+[$cfDefsData, $cfErr, $cfHttpCode, $cfRawBody] = rmm_get($rmmUrl . '/core/customfields/', $rmmToken);
+
+echo "<p>HTTP-Status: <b class='" . ($cfHttpCode >= 200 && $cfHttpCode < 300 ? 'ok' : 'err') . "'>{$cfHttpCode}</b></p>";
+
+$clientFieldIds = [];
+$siteFieldIds   = [];
+
+if ($cfErr) {
+    echo "<p class='warn'>Custom Fields konnten nicht geladen werden: " . htmlspecialchars($cfErr) . "<br>"
+       . "Fallback: Nur Wert-Vergleich ohne Field-ID-Filterung.</p>";
+} else {
+    $cfDefList = isset($cfDefsData['results']) ? $cfDefsData['results'] : $cfDefsData;
+    echo "<p class='ok'>Anzahl Custom Field-Definitionen: <b>" . count($cfDefList) . "</b></p>";
+    echo '<pre>';
+    foreach ($cfDefList as $cfDef) {
+        $cfId    = $cfDef['id']    ?? '?';
+        $cfName  = $cfDef['name']  ?? '?';
+        $cfModel = $cfDef['model'] ?? '?';
+        $isBerli = strtolower(trim((string)$cfName)) === 'berlicrm_id';
+        $marker  = $isBerli ? ' ← berlicrm_id' : '';
+        echo "id={$cfId}  name=" . htmlspecialchars((string)$cfName)
+           . "  model=" . htmlspecialchars((string)$cfModel) . $marker . "\n";
+        if ($isBerli && is_numeric($cfId)) {
+            $cfModelLower = strtolower(trim((string)$cfModel));
+            if (str_contains($cfModelLower, 'client')) {
+                $clientFieldIds[] = (int)$cfId;
+            } elseif (str_contains($cfModelLower, 'site')) {
+                $siteFieldIds[] = (int)$cfId;
+            }
+        }
+    }
+    echo '</pre>';
+    if (empty($clientFieldIds) && empty($siteFieldIds)) {
+        echo "<p class='warn'>WARNUNG: Kein Custom Field 'berlicrm_id' gefunden – noch nicht in TacticalRMM angelegt?<br>"
+           . "Fallback: Nur Wert-Vergleich ohne Field-ID-Filterung.</p>";
+    } else {
+        echo "<p class='ok'>clientFieldIds: [" . implode(', ', $clientFieldIds) . "] | "
+           . "siteFieldIds: [" . implode(', ', $siteFieldIds) . "]</p>";
+    }
+}
+
 // ── 4. API-Call 1: Clients ───────────────────────────────────────────────────
-echo '<hr><h2>Schritt 3: GET /clients/</h2>';
+echo '<hr><h2>Schritt 4: GET /clients/</h2>';
 [$clientsData, $err, $httpCode, $rawBody] = rmm_get($rmmUrl . '/clients/', $rmmToken);
 
 echo "<p>HTTP-Status: <b class='" . ($httpCode >= 200 && $httpCode < 300 ? 'ok' : 'err') . "'>{$httpCode}</b></p>";
@@ -148,45 +191,92 @@ if ($err) {
 $clientList = isset($clientsData['results']) ? $clientsData['results'] : $clientsData;
 echo "<p class='ok'>Anzahl Clients: <b>" . count($clientList) . "</b></p>";
 
-echo '<p>Alle Clients + Custom Fields:</p><pre>';
+echo '<p>Alle Clients + Custom Fields + eingebettete Sites:</p><pre>';
 $foundClientId = null;
+$foundSiteId   = null;
+$matchLevel    = null; // 'client' oder 'site'
+
 foreach ($clientList as $i => $client) {
     $cid    = $client['id']   ?? '?';
     $cname  = $client['name'] ?? '?';
     $fields = $client['custom_fields'] ?? [];
+    $sites  = $client['sites'] ?? [];
 
     $fieldStr = [];
     foreach ($fields as $f) {
         $fn = $f['field'] ?? '(?)';
         $fv = $f['value'] ?? '(?)';
-        $match = (strtolower((string)$fn) === 'berlicrm_id' && (string)$fv === $accountNo);
-        if ($match) $foundClientId = (int) $cid;
-        $fieldStr[] = ($match ? '>>>' : '   ') . " {$fn}=" . htmlspecialchars((string)$fv);
+        $match = rmm_match_field($f, $clientFieldIds, $accountNo);
+        if ($match && $foundClientId === null) {
+            $foundClientId = (int) $cid;
+            $matchLevel    = 'client';
+        }
+        $fieldStr[] = ($match ? '>>>' : '   ') . " field={$fn} value=" . htmlspecialchars((string)$fv);
     }
-    $marker = $foundClientId === (int)$cid ? " ← MATCH" : '';
-    echo "Client[{$i}] id={$cid}  name=" . htmlspecialchars($cname) . $marker . "\n";
+
+    $clientMarker = ($foundClientId === (int)$cid && $matchLevel === 'client') ? " ← CLIENT-MATCH" : '';
+    echo "Client[{$i}] id={$cid}  name=" . htmlspecialchars($cname) . $clientMarker . "\n";
     if ($fieldStr) {
         echo implode("\n", $fieldStr) . "\n";
     } else {
-        echo "   (keine custom_fields)\n";
+        echo "   (keine client custom_fields)\n";
     }
+
+    // Eingebettete Sites prüfen
+    foreach ($sites as $si => $site) {
+        $sid       = $site['id']   ?? '?';
+        $sname     = $site['name'] ?? "#{$si}";
+        $sfields   = $site['custom_fields'] ?? [];
+        $sfieldStr = [];
+        foreach ($sfields as $sf) {
+            $sfn = $sf['field'] ?? '(?)';
+            $sfv = $sf['value'] ?? '(?)';
+            $smatch = rmm_match_field($sf, $siteFieldIds, $accountNo);
+            if ($smatch && $foundClientId === null) {
+                $foundSiteId   = (int) $sid;
+                $foundClientId = (int) $cid;
+                $matchLevel    = 'site';
+            }
+            $sfieldStr[] = ($smatch ? '   >>>' : '      ') . " field={$sfn} value=" . htmlspecialchars((string)$sfv);
+        }
+        $siteMarker = ($foundSiteId === (int)$sid) ? " ← SITE-MATCH (clientId={$cid})" : '';
+        echo "  Site[{$si}] id={$sid}  name=" . htmlspecialchars($sname) . $siteMarker . "\n";
+        if ($sfieldStr) {
+            echo implode("\n", $sfieldStr) . "\n";
+        } else {
+            echo "      (keine site custom_fields)\n";
+        }
+    }
+
     echo "\n";
 }
 echo '</pre>';
 
 if (!$foundClientId) {
-    echo "<p class='err'>Kein Client mit <b>berlicrm_id=" . htmlspecialchars($accountNo) . "</b> gefunden.</p>";
+    echo "<p class='err'>Kein Client/Site mit <b>berlicrm_id=" . htmlspecialchars($accountNo) . "</b> gefunden.</p>";
     echo "<p class='warn'>Prüfe:<br>
     1. Ist das Custom Field in TacticalRMM als <b>berlicrm_id</b> (Kleinschreibung) angelegt?<br>
-    2. Stimmt der Wert exakt mit <b>" . htmlspecialchars($accountNo) . "</b> überein?</p>";
+    2. Stimmt der Wert exakt mit <b>" . htmlspecialchars($accountNo) . "</b> überein?<br>
+    3. clientFieldIds=[" . implode(',', $clientFieldIds) . "] siteFieldIds=[" . implode(',', $siteFieldIds) . "]</p>";
     die('</body></html>');
 }
 
-echo "<p class='ok'>Match gefunden: TacticalRMM client_id = <b>{$foundClientId}</b></p>";
+if ($matchLevel === 'site') {
+    echo "<p class='ok'>Match gefunden (Site-Level): TacticalRMM client_id = <b>{$foundClientId}</b>"
+       . " | site_id = <b>{$foundSiteId}</b></p>";
+} else {
+    echo "<p class='ok'>Match gefunden (Client-Level): TacticalRMM client_id = <b>{$foundClientId}</b></p>";
+}
 
 // ── 5. API-Call 2: Agents ────────────────────────────────────────────────────
-echo '<hr><h2>Schritt 4: GET /agents/?client_id=' . $foundClientId . '</h2>';
-[$agentsData, $err, $httpCode, $rawBody] = rmm_get($rmmUrl . '/agents/?client_id=' . $foundClientId, $rmmToken);
+if ($foundSiteId !== null) {
+    $agentsUrl = $rmmUrl . '/agents/?site=' . $foundSiteId;
+    echo '<hr><h2>Schritt 5: GET /agents/?site=' . $foundSiteId . ' (Site-Level Match)</h2>';
+} else {
+    $agentsUrl = $rmmUrl . '/agents/?client=' . $foundClientId;
+    echo '<hr><h2>Schritt 5: GET /agents/?client=' . $foundClientId . ' (Client-Level Match)</h2>';
+}
+[$agentsData, $err, $httpCode, $rawBody] = rmm_get($agentsUrl, $rmmToken);
 
 echo "<p>HTTP-Status: <b class='" . ($httpCode >= 200 && $httpCode < 300 ? 'ok' : 'err') . "'>{$httpCode}</b></p>";
 if ($err) {

@@ -34,6 +34,42 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         }
         $this->log("account_no gefunden: '{$accountNo}'");
 
+        // ── API-Call 0: Custom Field-Definitionen laden ──────────────────────
+        $url0 = rtrim($rmm_url, '/') . '/core/customfields/';
+        $this->log("API-Call 0: GET {$url0}");
+        [$cfDefs, $err0] = $this->apiGet($url0, $rmm_token);
+
+        $clientFieldIds = [];
+        $siteFieldIds   = [];
+
+        if ($err0 !== null) {
+            $this->log("WARNUNG API-Call 0 fehlgeschlagen: {$err0} – fahre ohne Field-ID-Filterung fort");
+        } else {
+            $cfList = isset($cfDefs['results']) ? $cfDefs['results'] : $cfDefs;
+            $this->log("API-Call 0 OK | Anzahl Custom Field-Definitionen: " . count($cfList));
+            foreach ($cfList as $cfDef) {
+                $cfName  = strtolower(trim((string) ($cfDef['name']  ?? '')));
+                $cfModel = strtolower(trim((string) ($cfDef['model'] ?? '')));
+                $cfId    = isset($cfDef['id']) ? (int) $cfDef['id'] : null;
+                if ($cfName !== 'berlicrm_id' || $cfId === null) {
+                    continue;
+                }
+                if (str_contains($cfModel, 'client')) {
+                    $clientFieldIds[] = $cfId;
+                    $this->log("  → clientFieldId gefunden: id={$cfId} model='{$cfModel}'");
+                } elseif (str_contains($cfModel, 'site')) {
+                    $siteFieldIds[] = $cfId;
+                    $this->log("  → siteFieldId gefunden: id={$cfId} model='{$cfModel}'");
+                }
+            }
+            if (empty($clientFieldIds) && empty($siteFieldIds)) {
+                $this->log("WARNUNG: Kein Custom Field 'berlicrm_id' in TacticalRMM gefunden – Field noch nicht angelegt?");
+            } else {
+                $this->log("Gesammelte clientFieldIds=[" . implode(',', $clientFieldIds) . "]"
+                    . " siteFieldIds=[" . implode(',', $siteFieldIds) . "]");
+            }
+        }
+
         // ── API-Call 1: alle Clients ────────────────────────────────────────
         $url1 = rtrim($rmm_url, '/') . '/clients/';
         $this->log("API-Call 1: GET {$url1}");
@@ -48,36 +84,69 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         $list = isset($clients['results']) ? $clients['results'] : $clients;
         $this->log("API-Call 1 OK | Anzahl Clients: " . count($list));
 
-        // ── Client-Suche ────────────────────────────────────────────────────
+        // ── Client- und Site-Suche ───────────────────────────────────────────
         $trmClientId = null;
+        $trmSiteId   = null;
+
         foreach ($list as $idx => $client) {
             $clientName   = $client['name'] ?? "#{$idx}";
             $clientId     = $client['id']   ?? '?';
             $fields       = $client['custom_fields'] ?? [];
             $fieldSummary = [];
+            $clientMatch  = false;
+
             foreach ($fields as $f) {
-                $fn = $f['field']       ?? '(kein field-Key)';
-                $fv = $f['value']       ?? '(kein value-Key)';
-                // Vergleich case-insensitiv und ohne Leerzeichen
-                $match = (
-                    isset($f['field'], $f['value'])
-                    && strtolower(trim((string) $f['field'])) === 'berlicrm_id'
-                    && strtolower(trim((string) $f['value'])) === strtolower(trim($accountNo))
-                );
-                $fieldSummary[] = "{$fn}=" . htmlspecialchars((string)$fv);
-                if ($match) {
+                $fn = $f['field'] ?? '(kein field-Key)';
+                $fv = $f['value'] ?? '(kein value-Key)';
+                $fieldSummary[] = "field={$fn} value=" . htmlspecialchars((string) $fv);
+                if ($this->matchField($f, $clientFieldIds, $accountNo)) {
                     $trmClientId = (int) $clientId;
+                    $clientMatch = true;
                 }
             }
+
             $this->log(
                 "  Client[{$idx}] id={$clientId} name='{$clientName}'"
                 . ' | custom_fields=[' . implode(', ', $fieldSummary ?: ['–']) . ']'
-                . ($trmClientId === (int) $clientId ? ' ← MATCH' : '')
+                . ($clientMatch ? ' ← CLIENT-MATCH (client-level custom field)' : '')
             );
+
+            // Auch eingebettete Sites prüfen
+            $sites = $client['sites'] ?? [];
+            foreach ($sites as $sidx => $site) {
+                $siteId     = $site['id']   ?? '?';
+                $siteName   = $site['name'] ?? "#{$sidx}";
+                $siteFields = $site['custom_fields'] ?? [];
+                $siteFSummary = [];
+                $siteMatch  = false;
+
+                foreach ($siteFields as $sf) {
+                    $sfn = $sf['field'] ?? '(kein field-Key)';
+                    $sfv = $sf['value'] ?? '(kein value-Key)';
+                    $siteFSummary[] = "field={$sfn} value=" . htmlspecialchars((string) $sfv);
+                    if ($this->matchField($sf, $siteFieldIds, $accountNo)) {
+                        $trmSiteId   = (int) $siteId;
+                        $trmClientId = (int) $clientId;
+                        $siteMatch   = true;
+                    }
+                }
+
+                $this->log(
+                    "    Site[{$sidx}] id={$siteId} name='{$siteName}'"
+                    . ' | custom_fields=[' . implode(', ', $siteFSummary ?: ['–']) . ']'
+                    . ($siteMatch ? " ← SITE-MATCH (site-level custom field, clientId={$clientId})" : '')
+                );
+            }
+
+            if ($trmClientId !== null) {
+                break; // ersten Match verwenden
+            }
         }
 
         if ($trmClientId === null) {
-            $this->log("ABBRUCH: kein Client mit berlicrm_id='{$accountNo}' gefunden");
+            $this->log("ABBRUCH: kein Client/Site mit berlicrm_id='{$accountNo}' gefunden"
+                . " | clientFieldIds=[" . implode(',', $clientFieldIds) . "]"
+                . " siteFieldIds=[" . implode(',', $siteFieldIds) . "]");
             $this->renderAlert('warning',
                 'Kein TacticalRMM-Client verknüpft (berlicrm_id = <strong>'
                 . htmlspecialchars($accountNo) . '</strong> nicht gefunden).'
@@ -86,11 +155,24 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
             echo '</div>';
             return;
         }
-        $this->log("Client gefunden: TacticalRMM client_id={$trmClientId}");
+
+        if ($trmSiteId !== null) {
+            $this->log("Match: Site-Level | trmClientId={$trmClientId} | trmSiteId={$trmSiteId}"
+                . " | siteFieldIds=[" . implode(',', $siteFieldIds) . "]");
+        } else {
+            $this->log("Match: Client-Level | trmClientId={$trmClientId}"
+                . " | clientFieldIds=[" . implode(',', $clientFieldIds) . "]");
+        }
 
         // ── API-Call 2: Agents ───────────────────────────────────────────────
-        $url2 = rtrim($rmm_url, '/') . '/agents/?client_id=' . urlencode((string) $trmClientId);
-        $this->log("API-Call 2: GET {$url2}");
+        if ($trmSiteId !== null) {
+            $url2 = rtrim($rmm_url, '/') . '/agents/?site=' . urlencode((string) $trmSiteId);
+            $this->log("API-Call 2: GET {$url2} (site-level match, siteId={$trmSiteId})");
+        } else {
+            $url2 = rtrim($rmm_url, '/') . '/agents/?client=' . urlencode((string) $trmClientId);
+            $this->log("API-Call 2: GET {$url2} (client-level match, clientId={$trmClientId})");
+        }
+
         [$agents, $err] = $this->apiGet($url2, $rmm_token);
         if ($err !== null) {
             $this->log("FEHLER API-Call 2: {$err}");
@@ -105,6 +187,44 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
         $this->renderTable($agents);
         $this->renderDebugPanel();
         echo '</div>';
+    }
+
+    /**
+     * Prüft ob ein custom_field-Eintrag zur gesuchten Account-Nummer passt.
+     *
+     * @param array  $f         Ein Eintrag aus custom_fields (keys: field, value, ...)
+     * @param array  $fieldIds  Bekannte numerische IDs für "berlicrm_id" aus /core/customfields/
+     * @param string $accountNo Die gesuchte Account-Nummer (z.B. "ACC27")
+     */
+    private function matchField(array $f, array $fieldIds, string $accountNo): bool
+    {
+        // Wert muss (case-insensitiv, ohne Leerzeichen) übereinstimmen
+        if (!isset($f['value'])) {
+            return false;
+        }
+        if (strtolower(trim((string) $f['value'])) !== strtolower(trim($accountNo))) {
+            return false;
+        }
+
+        // Kein field-Key vorhanden → kein Match
+        if (!isset($f['field'])) {
+            return false;
+        }
+
+        // Keine bekannten Field-IDs → Fallback: Wert-Match allein genügt (mit Warnung)
+        if (empty($fieldIds)) {
+            $this->log("  WARNUNG matchField: fieldIds leer, akzeptiere reinen Wert-Match für value='"
+                . htmlspecialchars((string) $f['value']) . "'");
+            return true;
+        }
+
+        // Numerische field-ID → per in_array prüfen
+        if (is_numeric($f['field'])) {
+            return in_array((int) $f['field'], $fieldIds, true);
+        }
+
+        // String-Wert → Kompatibilität mit älteren TRMM-Versionen
+        return strtolower(trim((string) $f['field'])) === 'berlicrm_id';
     }
 
     // ─── private helpers ──────────────────────────────────────────────────────
