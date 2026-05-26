@@ -200,6 +200,17 @@ if (!empty($clientList)) {
         . count($firstSites) . ', erste Site hat custom_fields: '
         . '<b class="' . ($firstSiteHasCF ? 'ok' : 'warn') . '">'
         . ($firstSiteHasCF ? 'JA' : 'NEIN – GET /clients/sites/ wird als Fallback genutzt') . '</b></p>';
+
+    // Rohdaten des ersten Clients (Schlüssel-Übersicht + sites-Array)
+    $keys = array_keys($first);
+    echo '<p>Verfügbare Felder im Client-Objekt: <b>' . implode(', ', $keys) . '</b></p>';
+    if (!empty($firstSites)) {
+        echo '<p>Erste eingebettete Site – verfügbare Felder: <b>'
+            . implode(', ', array_keys($firstSites[0])) . '</b></p>';
+        echo '<p>Rohdaten erste Site:</p><pre>'
+            . htmlspecialchars(json_encode($firstSites[0], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))
+            . '</pre>';
+    }
 }
 
 echo '<p>Alle Clients + Custom Fields + eingebettete Sites:</p><pre>';
@@ -271,6 +282,14 @@ if (!$foundClientId && !empty($siteFieldIds)) {
     if (!$sErr) {
         $siteList = isset($sitesData['results']) ? $sitesData['results'] : $sitesData;
         echo "<p class='ok'>Anzahl Sites: <b>" . count($siteList) . "</b></p>";
+        // Rohdaten der ersten Site zeigen
+        if (!empty($siteList)) {
+            echo '<p>Verfügbare Felder im Site-Objekt: <b>'
+                . implode(', ', array_keys($siteList[0])) . '</b></p>';
+            echo '<p>Rohdaten erste Site:</p><pre>'
+                . htmlspecialchars(json_encode($siteList[0], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))
+                . '</pre>';
+        }
         echo '<pre>';
         foreach ($siteList as $si => $site) {
             $sid     = $site['id']     ?? '?';
