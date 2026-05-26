@@ -9,279 +9,184 @@ class RMMDevices_InRelation_View extends Vtiger_Index_View {
     public function process(Vtiger_Request $request): void
     {
         $accountId = (int) $request->get('record');
-        $this->log("=== RMM Tab geöffnet | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
+        $this->log("=== RMM Tab | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
 
         [$rmm_url, $rmm_token, $configError] = $this->loadConfig();
-
         echo '<div class="relatedContainer" style="padding:12px">';
 
         if ($configError) {
-            $this->log("FEHLER Konfiguration: {$configError}");
             $this->renderAlert('warning', $configError);
             $this->renderDebugPanel();
             echo '</div>';
             return;
         }
-        $this->log("Konfiguration OK | rmm_url={$rmm_url}");
 
-        $accountNo = $this->fetchRmmClientId($accountId);
+        $accountNo = $this->getAccountNo($accountId);
         if ($accountNo === null) {
-            $this->log("ABBRUCH: account_no leer oder nicht gefunden");
             $this->renderAlert('info', 'Keine Account-Nummer (account_no) für diesen Datensatz gefunden.');
             $this->renderDebugPanel();
             echo '</div>';
             return;
         }
-        $this->log("account_no gefunden: '{$accountNo}'");
+        $this->log("account_no='{$accountNo}'");
 
-        // ── API-Call 0: Custom Field-Definitionen laden ──────────────────────
-        $url0 = rtrim($rmm_url, '/') . '/core/customfields/';
-        $this->log("API-Call 0: GET {$url0}");
-        [$cfDefs, $err0] = $this->apiGet($url0, $rmm_token);
-
-        $clientFieldIds = [];
+        // ── Schritt 1: Custom Field-Definitionen ─────────────────────────────
+        [$cfDefs, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/core/customfields/', $rmm_token);
         $siteFieldIds   = [];
-
-        if ($err0 !== null) {
-            $this->log("WARNUNG API-Call 0 fehlgeschlagen: {$err0} – fahre ohne Field-ID-Filterung fort");
-        } else {
-            $cfList = isset($cfDefs['results']) ? $cfDefs['results'] : $cfDefs;
-            $this->log("API-Call 0 OK | Anzahl Custom Field-Definitionen: " . count($cfList));
-            foreach ($cfList as $cfDef) {
-                $cfName  = strtolower(trim((string) ($cfDef['name']  ?? '')));
-                $cfModel = strtolower(trim((string) ($cfDef['model'] ?? '')));
-                $cfId    = isset($cfDef['id']) ? (int) $cfDef['id'] : null;
-                if ($cfName !== 'berlicrm_id' || $cfId === null) {
-                    continue;
-                }
-                if (str_contains($cfModel, 'client')) {
-                    $clientFieldIds[] = $cfId;
-                    $this->log("  → clientFieldId gefunden: id={$cfId} model='{$cfModel}'");
-                } elseif (str_contains($cfModel, 'site')) {
-                    $siteFieldIds[] = $cfId;
-                    $this->log("  → siteFieldId gefunden: id={$cfId} model='{$cfModel}'");
-                }
-            }
-            if (empty($clientFieldIds) && empty($siteFieldIds)) {
-                $this->log("WARNUNG: Kein Custom Field 'berlicrm_id' in TacticalRMM gefunden – Field noch nicht angelegt?");
-            } else {
-                $this->log("Gesammelte clientFieldIds=[" . implode(',', $clientFieldIds) . "]"
-                    . " siteFieldIds=[" . implode(',', $siteFieldIds) . "]");
+        $clientFieldIds = [];
+        if ($err === null && is_array($cfDefs)) {
+            $cfList = $cfDefs['results'] ?? $cfDefs;
+            foreach ($cfList as $cf) {
+                if (!is_array($cf)) continue;
+                if (strtolower(trim((string)($cf['name'] ?? ''))) !== 'berlicrm_id') continue;
+                $cfId    = isset($cf['id']) ? (int)$cf['id'] : null;
+                $cfModel = strtolower(trim((string)($cf['model'] ?? '')));
+                if ($cfId === null) continue;
+                if ($cfModel === 'site')   $siteFieldIds[]   = $cfId;
+                if ($cfModel === 'client') $clientFieldIds[] = $cfId;
             }
         }
+        $this->log("fieldIds: client=[" . implode(',', $clientFieldIds) . "] site=[" . implode(',', $siteFieldIds) . "]");
 
-        // ── API-Call 1: alle Clients ────────────────────────────────────────
-        $url1 = rtrim($rmm_url, '/') . '/clients/';
-        $this->log("API-Call 1: GET {$url1}");
-        [$clients, $err] = $this->apiGet($url1, $rmm_token);
-        if ($err !== null) {
-            $this->log("FEHLER API-Call 1: {$err}");
-            $this->renderAlert('danger', 'TacticalRMM API nicht erreichbar: ' . htmlspecialchars($err));
-            $this->renderDebugPanel();
-            echo '</div>';
-            return;
-        }
-        $list = isset($clients['results']) ? $clients['results'] : $clients;
-        $this->log("API-Call 1 OK | Anzahl Clients: " . count($list));
-
-        // ── Client- und Site-Suche ───────────────────────────────────────────
+        // ── Schritt 2: Verknüpften Client/Site finden ────────────────────────
         $trmClientId = null;
         $trmSiteId   = null;
 
-        foreach ($list as $idx => $client) {
-            $clientName   = $client['name'] ?? "#{$idx}";
-            $clientId     = $client['id']   ?? '?';
-            $fields       = $client['custom_fields'] ?? [];
-            $fieldSummary = [];
-            $clientMatch  = false;
-
-            foreach ($fields as $f) {
-                $fn = $f['field'] ?? '(kein field-Key)';
-                $fv = $f['value'] ?? '(kein value-Key)';
-                $fieldSummary[] = "field={$fn} value=" . htmlspecialchars((string) $fv);
-                if ($this->matchField($f, $clientFieldIds, $accountNo)) {
-                    $trmClientId = (int) $clientId;
-                    $clientMatch = true;
-                }
+        // 2a: Site-Suche direkt über /clients/sites/ (NICHT über /clients/)
+        if (!empty($siteFieldIds)) {
+            $this->log("Suche in /clients/sites/ (siteFieldIds=[" . implode(',', $siteFieldIds) . "])");
+            [$sitesData, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/clients/sites/', $rmm_token);
+            if ($err !== null) {
+                $this->log("FEHLER /clients/sites/: {$err}");
+                $this->renderAlert('danger', 'TacticalRMM /clients/sites/ nicht erreichbar: ' . htmlspecialchars($err));
+                $this->renderDebugPanel();
+                echo '</div>';
+                return;
             }
-
-            $this->log(
-                "  Client[{$idx}] id={$clientId} name='{$clientName}'"
-                . ' | custom_fields=[' . implode(', ', $fieldSummary ?: ['–']) . ']'
-                . ($clientMatch ? ' ← CLIENT-MATCH (client-level custom field)' : '')
-            );
-
-            // Auch eingebettete Sites prüfen
-            $sites = $client['sites'] ?? [];
-            foreach ($sites as $sidx => $site) {
-                $siteId     = $site['id']   ?? '?';
-                $siteName   = $site['name'] ?? "#{$sidx}";
-                $siteFields = $site['custom_fields'] ?? [];
-                $siteFSummary = [];
-                $siteMatch  = false;
-
-                foreach ($siteFields as $sf) {
-                    $sfn = $sf['field'] ?? '(kein field-Key)';
-                    $sfv = $sf['value'] ?? '(kein value-Key)';
-                    $siteFSummary[] = "field={$sfn} value=" . htmlspecialchars((string) $sfv);
-                    if ($this->matchField($sf, $siteFieldIds, $accountNo)) {
-                        $trmSiteId   = (int) $siteId;
-                        $trmClientId = (int) $clientId;
-                        $siteMatch   = true;
+            $siteList = $sitesData['results'] ?? $sitesData;
+            $this->log("Sites geladen: " . count((array)$siteList));
+            foreach ((array)$siteList as $site) {
+                if (!is_array($site)) continue;
+                foreach ((array)($site['custom_fields'] ?? []) as $cf) {
+                    if ($this->matchField($cf, $siteFieldIds, $accountNo)) {
+                        $trmSiteId   = (int)($site['id']     ?? 0);
+                        $trmClientId = (int)($site['client'] ?? 0);
+                        $this->log("MATCH Site id={$trmSiteId} client_id={$trmClientId} name='" . ($site['name'] ?? '') . "'");
+                        break 2;
                     }
                 }
-
-                $this->log(
-                    "    Site[{$sidx}] id={$siteId} name='{$siteName}'"
-                    . ' | custom_fields=[' . implode(', ', $siteFSummary ?: ['–']) . ']'
-                    . ($siteMatch ? " ← SITE-MATCH (site-level custom field, clientId={$clientId})" : '')
-                );
-            }
-
-            if ($trmClientId !== null) {
-                break; // ersten Match verwenden
             }
         }
 
-        // ── Fallback: GET /clients/sites/ falls Sites im Client-Response keine custom_fields hatten ──
-        if ($trmClientId === null && !empty($siteFieldIds)) {
-            $urlSites = rtrim($rmm_url, '/') . '/clients/sites/';
-            $this->log("Fallback API-Call: GET {$urlSites}");
-            [$sitesData, $sErr] = $this->apiGet($urlSites, $rmm_token);
-            if ($sErr === null) {
-                $siteList = isset($sitesData['results']) ? $sitesData['results'] : $sitesData;
-                $this->log("Fallback OK | Anzahl Sites: " . count($siteList));
-                foreach ($siteList as $sidx => $site) {
-                    $siteId   = (int) ($site['id']     ?? 0);
-                    $siteName = $site['name'] ?? "#{$sidx}";
-                    $clientId = (int) ($site['client'] ?? 0);
-                    $sfSummary = [];
-                    foreach ((array) ($site['custom_fields'] ?? []) as $sf) {
-                        $sfSummary[] = "field=" . ($sf['field'] ?? '?') . " value=" . htmlspecialchars((string)($sf['value'] ?? ''));
-                        if ($this->matchField($sf, $siteFieldIds, $accountNo)) {
-                            $trmSiteId   = $siteId;
-                            $trmClientId = $clientId;
-                        }
+        // 2b: Client-Suche über /clients/ (nur wenn kein Site-Match)
+        if ($trmClientId === null && !empty($clientFieldIds)) {
+            $this->log("Suche in /clients/ (clientFieldIds=[" . implode(',', $clientFieldIds) . "])");
+            [$clientsData, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/clients/', $rmm_token);
+            if ($err !== null) {
+                $this->log("FEHLER /clients/: {$err}");
+                $this->renderAlert('danger', 'TacticalRMM /clients/ nicht erreichbar: ' . htmlspecialchars($err));
+                $this->renderDebugPanel();
+                echo '</div>';
+                return;
+            }
+            $clientList = $clientsData['results'] ?? $clientsData;
+            $this->log("Clients geladen: " . count((array)$clientList));
+            foreach ((array)$clientList as $client) {
+                if (!is_array($client)) continue;
+                foreach ((array)($client['custom_fields'] ?? []) as $cf) {
+                    if ($this->matchField($cf, $clientFieldIds, $accountNo)) {
+                        $trmClientId = (int)($client['id'] ?? 0);
+                        $this->log("MATCH Client id={$trmClientId} name='" . ($client['name'] ?? '') . "'");
+                        break 2;
                     }
-                    $this->log("  Site[{$sidx}] id={$siteId} client_id={$clientId} name='{$siteName}'"
-                        . ' | custom_fields=[' . implode(', ', $sfSummary ?: ['–']) . ']'
-                        . ($trmSiteId === $siteId ? ' ← MATCH (fallback sites endpoint)' : ''));
-                    if ($trmClientId !== null) break;
                 }
-            } else {
-                $this->log("Fallback fehlgeschlagen: {$sErr}");
             }
         }
 
         if ($trmClientId === null) {
-            $this->log("ABBRUCH: kein Client/Site mit berlicrm_id='{$accountNo}' gefunden"
-                . " | clientFieldIds=[" . implode(',', $clientFieldIds) . "]"
-                . " siteFieldIds=[" . implode(',', $siteFieldIds) . "]");
+            $this->log("Kein Match für berlicrm_id='{$accountNo}'");
             $this->renderAlert('warning',
                 'Kein TacticalRMM-Client verknüpft (berlicrm_id = <strong>'
-                . htmlspecialchars($accountNo) . '</strong> nicht gefunden).'
-                . ' Alle geprüften Clients und deren Custom Fields im Debug-Panel unten.');
+                . htmlspecialchars($accountNo) . '</strong> nicht gefunden).');
             $this->renderDebugPanel();
             echo '</div>';
             return;
         }
 
+        // ── Schritt 3: Agents laden ──────────────────────────────────────────
         if ($trmSiteId !== null) {
-            $this->log("Match: Site-Level | trmClientId={$trmClientId} | trmSiteId={$trmSiteId}"
-                . " | siteFieldIds=[" . implode(',', $siteFieldIds) . "]");
+            $agentsUrl = rtrim($rmm_url, '/') . '/agents/?site=' . $trmSiteId;
+            $this->log("GET {$agentsUrl}");
         } else {
-            $this->log("Match: Client-Level | trmClientId={$trmClientId}"
-                . " | clientFieldIds=[" . implode(',', $clientFieldIds) . "]");
+            $agentsUrl = rtrim($rmm_url, '/') . '/agents/?client=' . $trmClientId;
+            $this->log("GET {$agentsUrl}");
         }
 
-        // ── API-Call 2: Agents ───────────────────────────────────────────────
-        if ($trmSiteId !== null) {
-            $url2 = rtrim($rmm_url, '/') . '/agents/?site=' . urlencode((string) $trmSiteId);
-            $this->log("API-Call 2: GET {$url2} (site-level match, siteId={$trmSiteId})");
-        } else {
-            $url2 = rtrim($rmm_url, '/') . '/agents/?client=' . urlencode((string) $trmClientId);
-            $this->log("API-Call 2: GET {$url2} (client-level match, clientId={$trmClientId})");
-        }
-
-        [$agents, $err] = $this->apiGet($url2, $rmm_token);
+        [$agentsData, $err] = $this->rmmGet($agentsUrl, $rmm_token);
         if ($err !== null) {
-            $this->log("FEHLER API-Call 2: {$err}");
+            $this->log("FEHLER Agents: {$err}");
             $this->renderAlert('danger', 'Fehler beim Laden der Agents: ' . htmlspecialchars($err));
             $this->renderDebugPanel();
             echo '</div>';
             return;
         }
-        $agentList = isset($agents['results']) ? $agents['results'] : $agents;
-        $this->log("API-Call 2 OK | Anzahl Agents: " . count($agentList));
+        $agentList = $agentsData['results'] ?? $agentsData;
+        $this->log("Agents geladen: " . count((array)$agentList));
 
-        $this->renderTable($agents);
+        $this->renderTable((array)$agentList);
         $this->renderDebugPanel();
         echo '</div>';
     }
 
-    /**
-     * Prüft ob ein custom_field-Eintrag zur gesuchten Account-Nummer passt.
-     *
-     * @param array  $f         Ein Eintrag aus custom_fields (keys: field, value, ...)
-     * @param array  $fieldIds  Bekannte numerische IDs für "berlicrm_id" aus /core/customfields/
-     * @param string $accountNo Die gesuchte Account-Nummer (z.B. "ACC27")
-     */
-    private function matchField(array $f, array $fieldIds, string $accountNo): bool
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private function matchField(array $cf, array $fieldIds, string $accountNo): bool
     {
-        // Wert muss (case-insensitiv, ohne Leerzeichen) übereinstimmen
-        if (!isset($f['value'])) {
-            return false;
-        }
-        if (strtolower(trim((string) $f['value'])) !== strtolower(trim($accountNo))) {
-            return false;
-        }
-
-        // Kein field-Key vorhanden → kein Match
-        if (!isset($f['field'])) {
-            return false;
-        }
-
-        // Keine bekannten Field-IDs → Fallback: Wert-Match allein genügt (mit Warnung)
-        if (empty($fieldIds)) {
-            $this->log("  WARNUNG matchField: fieldIds leer, akzeptiere reinen Wert-Match für value='"
-                . htmlspecialchars((string) $f['value']) . "'");
-            return true;
-        }
-
-        // Numerische field-ID → per in_array prüfen
-        if (is_numeric($f['field'])) {
-            return in_array((int) $f['field'], $fieldIds, true);
-        }
-
-        // String-Wert → Kompatibilität mit älteren TRMM-Versionen
-        return strtolower(trim((string) $f['field'])) === 'berlicrm_id';
+        if (!isset($cf['value'])) return false;
+        if (strtolower(trim((string)$cf['value'])) !== strtolower(trim($accountNo))) return false;
+        if (!isset($cf['field'])) return false;
+        if (empty($fieldIds)) return true; // Fallback: Wert-Match allein
+        if (is_numeric($cf['field'])) return in_array((int)$cf['field'], $fieldIds, true);
+        return strtolower(trim((string)$cf['field'])) === 'berlicrm_id';
     }
 
-    // ─── private helpers ──────────────────────────────────────────────────────
+    private function rmmGet(string $url, string $token): array
+    {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_HTTPHEADER     => ['X-API-KEY: ' . $token, 'Content-Type: application/json'],
+            CURLOPT_SSL_VERIFYPEER => false,
+        ]);
+        $body    = curl_exec($ch);
+        $code    = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr = curl_error($ch);
+        curl_close($ch);
+
+        $this->log("  HTTP {$code}" . ($curlErr ? " cURL:{$curlErr}" : '') . " body[0..300]=" . substr((string)$body, 0, 300));
+
+        if ($body === false || $curlErr !== '') return [null, $curlErr ?: 'cURL-Fehler'];
+        if ($code < 200 || $code >= 300)        return [null, "HTTP {$code}: " . substr((string)$body, 0, 200)];
+        $data = json_decode($body, true);
+        if (!is_array($data))                   return [null, 'Ungültige JSON-Antwort: ' . substr((string)$body, 0, 200)];
+        return [$data, null];
+    }
 
     private function log(string $line): void
     {
         $this->debugLog[] = $line;
-
         if ($this->logFile === '') {
-            // __DIR__ = .../modules/RMMDevices/views  →  drei Ebenen hoch = berliCRM-Root
-            $this->logFile = realpath(__DIR__ . '/../../..') . DIRECTORY_SEPARATOR
-                           . 'logs' . DIRECTORY_SEPARATOR . 'rmm_debug.log';
+            $root = realpath(__DIR__ . '/../../..');
+            $this->logFile = $root . DIRECTORY_SEPARATOR . 'logs' . DIRECTORY_SEPARATOR . 'rmm_debug.log';
         }
-
-        $written = file_put_contents($this->logFile, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
-        if ($written === false && count($this->debugLog) === 1) {
-            // Schreiben fehlgeschlagen – Pfad + Fehler in den Debug-Buffer aufnehmen
-            $this->debugLog[] = '[LOG-FEHLER] Konnte nicht in "' . $this->logFile
-                . '" schreiben. PHP-Fehler: ' . error_get_last()['message'] ?? 'unbekannt';
-        }
+        file_put_contents($this->logFile, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
     }
 
     private function renderDebugPanel(): void
     {
         $id   = 'rmm-debug-' . uniqid();
-        $lines = array_map('htmlspecialchars', $this->debugLog);
-        $text  = implode("\n", $lines);
+        $text = implode("\n", array_map('htmlspecialchars', $this->debugLog));
         echo <<<HTML
 <div style="margin-top:14px">
   <button onclick="var p=document.getElementById('{$id}');p.style.display=p.style.display==='none'?'block':'none'"
@@ -307,111 +212,57 @@ HTML;
         return [$cfg['rmm_url'], $cfg['rmm_token'], null];
     }
 
-    private function fetchRmmClientId(int $accountId): ?string
+    private function getAccountNo(int $accountId): ?string
     {
-        $db     = PearDatabase::getInstance();
-        $result = $db->pquery(
-            'SELECT account_no FROM vtiger_account WHERE accountid = ?',
-            [$accountId]
-        );
-        $row = $db->fetchByAssoc($result);
-        if (!$row || trim((string) $row['account_no']) === '') {
-            return null;
-        }
+        $db  = PearDatabase::getInstance();
+        $res = $db->pquery('SELECT account_no FROM vtiger_account WHERE accountid = ?', [$accountId]);
+        $row = $db->fetchByAssoc($res);
+        if (!$row || trim((string)$row['account_no']) === '') return null;
         return trim($row['account_no']);
     }
 
-    /**
-     * Returns [decoded_array_or_null, error_string_or_null].
-     * Logs HTTP status and first 500 chars of response body.
-     */
-    private function apiGet(string $url, string $token): array
+    private function renderTable(array $list): void
     {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 10,
-            CURLOPT_HTTPHEADER     => [
-                'X-API-KEY: ' . $token,
-                'Content-Type: application/json',
-            ],
-            CURLOPT_SSL_VERIFYPEER => false,
-        ]);
-        $body     = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlErr  = curl_error($ch);
-        curl_close($ch);
-
-        $this->log("  → HTTP {$httpCode}"
-            . ($curlErr ? " | cURL-Fehler: {$curlErr}" : '')
-            . " | Body (erste 500 Zeichen): " . substr((string) $body, 0, 500));
-
-        if ($body === false || $curlErr !== '') {
-            return [null, $curlErr ?: 'cURL-Fehler'];
-        }
-        if ($httpCode < 200 || $httpCode >= 300) {
-            return [null, 'HTTP ' . $httpCode . ' – ' . substr((string) $body, 0, 200)];
-        }
-        $data = json_decode($body, true);
-        if (!is_array($data)) {
-            return [null, 'Ungültige JSON-Antwort: ' . substr((string) $body, 0, 200)];
-        }
-        return [$data, null];
-    }
-
-    private function renderTable(array $agents): void
-    {
-        $list = isset($agents['results']) ? $agents['results'] : $agents;
-
         if (empty($list)) {
             $this->renderAlert('info', 'Keine Agents für diesen Client gefunden.');
             return;
         }
 
-        echo '<table class="table table-bordered listViewEntriesTable" '
-            . 'style="width:100%;border-collapse:collapse;font-size:13px">';
-
+        echo '<table class="table table-bordered listViewEntriesTable" style="width:100%;border-collapse:collapse;font-size:13px">';
         echo '<thead><tr class="listViewHeaders" style="background:#f5f5f5">';
         foreach (['Hostname', 'Status', 'OS', 'Letzter Kontakt', 'CPU %', 'RAM %'] as $col) {
-            echo '<th style="padding:6px 10px;text-align:left;border:1px solid #ddd">'
-                . htmlspecialchars($col) . '</th>';
+            echo '<th style="padding:6px 10px;text-align:left;border:1px solid #ddd">' . htmlspecialchars($col) . '</th>';
         }
         echo '</tr></thead><tbody>';
 
         foreach ($list as $agent) {
-            $hostname    = htmlspecialchars((string) ($agent['hostname']         ?? ''));
-            $rawStatus   = (string) ($agent['status']          ?? '');
-            $os          = htmlspecialchars((string) ($agent['operating_system'] ?? $agent['plat'] ?? ''));
-            $lastContact = htmlspecialchars((string) ($agent['last_seen']        ?? $agent['last_alert_time'] ?? ''));
-            $cpu         = isset($agent['cpu_load']) ? (int) $agent['cpu_load'] : null;
-            $ram         = isset($agent['used_ram']) ? (int) $agent['used_ram'] : null;
+            if (!is_array($agent)) continue;
+            $hostname    = htmlspecialchars((string)($agent['hostname']         ?? ''));
+            $rawStatus   = (string)($agent['status']            ?? '');
+            $os          = htmlspecialchars((string)($agent['operating_system'] ?? $agent['plat'] ?? ''));
+            $lastContact = htmlspecialchars((string)($agent['last_seen']        ?? $agent['last_alert_time'] ?? ''));
+            $cpu         = isset($agent['cpu_load']) ? (int)$agent['cpu_load'] : null;
+            $ram         = isset($agent['used_ram']) ? (int)$agent['used_ram'] : null;
 
-            [$statusLabel, $statusStyle] = $this->statusDisplay($rawStatus);
-
-            $cpuDisplay = $cpu !== null
-                ? '<span style="' . $this->trafficLight($cpu) . '">' . $cpu . ' %</span>'
-                : '<span style="color:#999">–</span>';
-            $ramDisplay = $ram !== null
-                ? '<span style="' . $this->trafficLight($ram) . '">' . $ram . ' %</span>'
-                : '<span style="color:#999">–</span>';
+            [$statusLabel, $statusStyle] = $this->statusLabel($rawStatus);
+            $cpuHtml = $cpu !== null ? '<span style="' . $this->trafficLight($cpu) . '">' . $cpu . ' %</span>' : '<span style="color:#999">–</span>';
+            $ramHtml = $ram !== null ? '<span style="' . $this->trafficLight($ram) . '">' . $ram . ' %</span>' : '<span style="color:#999">–</span>';
 
             echo '<tr class="listViewEntries" style="border-bottom:1px solid #eee">';
             echo '<td style="padding:5px 10px;border:1px solid #ddd">' . $hostname . '</td>';
-            echo '<td style="padding:5px 10px;border:1px solid #ddd"><span style="'
-                . $statusStyle . '">' . $statusLabel . '</span></td>';
+            echo '<td style="padding:5px 10px;border:1px solid #ddd"><span style="' . $statusStyle . '">' . $statusLabel . '</span></td>';
             echo '<td style="padding:5px 10px;border:1px solid #ddd">' . $os . '</td>';
             echo '<td style="padding:5px 10px;border:1px solid #ddd">' . $lastContact . '</td>';
-            echo '<td style="padding:5px 10px;border:1px solid #ddd;text-align:center">' . $cpuDisplay . '</td>';
-            echo '<td style="padding:5px 10px;border:1px solid #ddd;text-align:center">' . $ramDisplay . '</td>';
+            echo '<td style="padding:5px 10px;border:1px solid #ddd;text-align:center">' . $cpuHtml . '</td>';
+            echo '<td style="padding:5px 10px;border:1px solid #ddd;text-align:center">' . $ramHtml . '</td>';
             echo '</tr>';
         }
 
         echo '</tbody></table>';
-        echo '<div style="font-size:11px;color:#999;margin-top:6px">'
-            . count($list) . ' Agent(s) geladen</div>';
+        echo '<div style="font-size:11px;color:#999;margin-top:6px">' . count($list) . ' Agent(s) geladen</div>';
     }
 
-    private function statusDisplay(string $status): array
+    private function statusLabel(string $status): array
     {
         return match (strtolower($status)) {
             'online'  => ['Online',  'color:#2e7d32;font-weight:bold'],
@@ -436,8 +287,6 @@ HTML;
             'danger'  => ['#f8d7da', '#721c24', '#f5c6cb'],
         ];
         [$bg, $fg, $border] = $colors[$type] ?? $colors['info'];
-        echo '<div style="background:' . $bg . ';color:' . $fg . ';border:1px solid '
-            . $border . ';padding:10px 14px;border-radius:4px;margin:8px 0">'
-            . $html . '</div>';
+        echo '<div style="background:' . $bg . ';color:' . $fg . ';border:1px solid ' . $border . ';padding:10px 14px;border-radius:4px;margin:8px 0">' . $html . '</div>';
     }
 }
