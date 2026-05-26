@@ -13,6 +13,13 @@ ini_set('memory_limit', '256M');
 ob_implicit_flush(true);
 if (ob_get_level()) ob_end_clean();
 
+$_rmmLogFile = __DIR__ . '/logs/rmm_diag.log';
+function rmmlog(string $msg): void {
+    global $_rmmLogFile;
+    @file_put_contents($_rmmLogFile, date('H:i:s') . ' ' . $msg . PHP_EOL, FILE_APPEND | LOCK_EX);
+}
+rmmlog("=== START rmm_test.php " . date('Y-m-d H:i:s') . " ===");
+
 // ── Bootstrap: Direkte PDO-Verbindung über vtiger-Config ─────────────────────
 chdir(__DIR__);
 
@@ -78,6 +85,7 @@ if ($pdo === null) {
     exit;
 }
 echo "<p class='ok'>Datenbankverbindung OK ({$dbname}@{$host})</p><hr>";
+rmmlog("DB OK");
 
 // ── 1. record-Parameter (account_no ODER numerische accountid) ───────────────
 $param = isset($_GET['record']) ? trim($_GET['record']) : '';
@@ -141,40 +149,34 @@ echo "<p>HTTP-Status: <b class='" . ($cfHttpCode >= 200 && $cfHttpCode < 300 ? '
 $clientFieldIds = [];
 $siteFieldIds   = [];
 
+rmmlog("Schritt 3 HTTP {$cfHttpCode} err=" . ($cfErr ?? 'none'));
 if ($cfErr) {
-    echo "<p class='warn'>Custom Fields konnten nicht geladen werden: " . htmlspecialchars($cfErr) . "<br>"
-       . "Fallback: Nur Wert-Vergleich ohne Field-ID-Filterung.</p>";
+    echo "<p class='warn'>Custom Fields konnten nicht geladen werden: " . htmlspecialchars($cfErr) . " – Fallback ohne Field-ID-Filterung.</p>";
 } else {
-    $cfDefList = isset($cfDefsData['results']) ? $cfDefsData['results'] : $cfDefsData;
+    $cfDefList = isset($cfDefsData['results']) ? $cfDefsData['results'] : (array)$cfDefsData;
     echo "<p class='ok'>Anzahl Custom Field-Definitionen: <b>" . count($cfDefList) . "</b></p>";
-    echo '<pre>';
-    foreach ($cfDefList as $cfDef) {
-        $cfId    = $cfDef['id']    ?? '?';
-        $cfName  = $cfDef['name']  ?? '?';
-        $cfModel = $cfDef['model'] ?? '?';
-        $isBerli = strtolower(trim((string)$cfName)) === 'berlicrm_id';
-        $marker  = $isBerli ? ' ← berlicrm_id' : '';
-        echo "id={$cfId}  name=" . htmlspecialchars((string)$cfName)
-           . "  model=" . htmlspecialchars((string)$cfModel) . $marker . "\n";
-        if ($isBerli && is_numeric($cfId)) {
-            $cfModelLower = strtolower(trim((string)$cfModel));
-            if (str_contains($cfModelLower, 'client')) {
-                $clientFieldIds[] = (int)$cfId;
-            } elseif (str_contains($cfModelLower, 'site')) {
-                $siteFieldIds[] = (int)$cfId;
-            }
-        }
-    }
-    echo '</pre>';
-    if (empty($clientFieldIds) && empty($siteFieldIds)) {
-        echo "<p class='warn'>WARNUNG: Kein Custom Field 'berlicrm_id' gefunden – noch nicht in TacticalRMM angelegt?<br>"
-           . "Fallback: Nur Wert-Vergleich ohne Field-ID-Filterung.</p>";
-    } else {
-        echo "<p class='ok'>clientFieldIds: [" . implode(', ', $clientFieldIds) . "] | "
-           . "siteFieldIds: [" . implode(', ', $siteFieldIds) . "]</p>";
-    }
-}
 
+    // Rohdaten direkt ausgeben – kein Loop der crashen könnte
+    echo '<p>Rohdaten (alle Felder):</p><pre>'
+        . htmlspecialchars(json_encode($cfDefList, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))
+        . '</pre>';
+
+    // Field-IDs extrahieren ohne riskante String-Operationen
+    foreach ($cfDefList as $cfDef) {
+        if (!is_array($cfDef)) continue;
+        $cfId    = isset($cfDef['id'])    ? (int)$cfDef['id']              : null;
+        $cfName  = isset($cfDef['name'])  ? strtolower(trim($cfDef['name'])) : '';
+        $cfModel = isset($cfDef['model']) ? strtolower(trim($cfDef['model'])) : '';
+        if ($cfName !== 'berlicrm_id' || $cfId === null) continue;
+        if (str_contains($cfModel, 'client')) $clientFieldIds[] = $cfId;
+        elseif (str_contains($cfModel, 'site')) $siteFieldIds[] = $cfId;
+    }
+    echo "<p class='ok'>clientFieldIds: [" . implode(', ', $clientFieldIds) . "] | "
+       . "siteFieldIds: [" . implode(', ', $siteFieldIds) . "]</p>";
+}
+rmmlog("clientFieldIds=[" . implode(',', $clientFieldIds) . "] siteFieldIds=[" . implode(',', $siteFieldIds) . "]");
+
+rmmlog("Schritt 3 abgeschlossen – starte Schritt 4");
 flush();
 
 // ── 4. API-Call 1: Clients ───────────────────────────────────────────────────
