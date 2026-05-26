@@ -12,12 +12,13 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         $this->log("=== RMM Tab | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
 
         [$rmm_url, $rmm_token, $configError] = $this->loadConfig();
-        $html = '<div class="relatedContainer" style="padding:12px">';
+        $html = '<div class="relatedContainer" data-rmm="rmmdevices" style="padding:12px">';
 
         if ($configError) {
             $html .= $this->renderAlert('warning', $configError);
             $html .= $this->renderDebugPanel();
             $html .= '</div>';
+            $html .= $this->renderSelfInsertScript();
             return $html;
         }
 
@@ -26,6 +27,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             $html .= $this->renderAlert('info', 'Keine Account-Nummer (account_no) für diesen Datensatz gefunden.');
             $html .= $this->renderDebugPanel();
             $html .= '</div>';
+            $html .= $this->renderSelfInsertScript();
             return $html;
         }
         $this->log("account_no='{$accountNo}'");
@@ -61,6 +63,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
                 $html .= $this->renderAlert('danger', 'TacticalRMM /clients/sites/ nicht erreichbar: ' . htmlspecialchars($err));
                 $html .= $this->renderDebugPanel();
                 $html .= '</div>';
+                $html .= $this->renderSelfInsertScript();
                 return $html;
             }
             $siteList = $sitesData['results'] ?? $sitesData;
@@ -87,6 +90,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
                 $html .= $this->renderAlert('danger', 'TacticalRMM /clients/ nicht erreichbar: ' . htmlspecialchars($err));
                 $html .= $this->renderDebugPanel();
                 $html .= '</div>';
+                $html .= $this->renderSelfInsertScript();
                 return $html;
             }
             $clientList = $clientsData['results'] ?? $clientsData;
@@ -110,6 +114,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
                 . htmlspecialchars($accountNo) . '</strong> nicht gefunden).');
             $html .= $this->renderDebugPanel();
             $html .= '</div>';
+            $html .= $this->renderSelfInsertScript();
             return $html;
         }
 
@@ -128,6 +133,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             $html .= $this->renderAlert('danger', 'Fehler beim Laden der Agents: ' . htmlspecialchars($err));
             $html .= $this->renderDebugPanel();
             $html .= '</div>';
+            $html .= $this->renderSelfInsertScript();
             return $html;
         }
         $agentList = $agentsData['results'] ?? $agentsData;
@@ -136,6 +142,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         $html .= $this->renderTable((array)$agentList);
         $html .= $this->renderDebugPanel();
         $html .= '</div>';
+        $html .= $this->renderSelfInsertScript();
 
         return $html;
     }
@@ -281,6 +288,43 @@ HTML;
         if ($pct >= 90) return 'color:#c62828;font-weight:bold';
         if ($pct >= 70) return 'color:#e65100';
         return 'color:#2e7d32';
+    }
+
+    private function renderSelfInsertScript(): string
+    {
+        return <<<'JS'
+<script type="text/javascript">
+(function($){
+    // Snapshot the HTML of our content div while it is still in the DOM
+    // (this script runs during jQuery's .html() call, so the element exists)
+    var $rc = $('[data-rmm="rmmdevices"]').first();
+    var rmmHtml = $rc.length ? $rc.prop('outerHTML') : '';
+
+    // After a short delay, check whether the content actually made it into the
+    // visible content holder and remove any blocking overlay if needed.
+    setTimeout(function(){
+        var $target = $('div.details div.contents').first();
+        if (!$target.length) {
+            $target = $('div.contentsDiv div.contents, div.contents').first();
+        }
+
+        // If our content is not yet in the target container, force-insert it
+        if ($target.length && !$target.find('[data-rmm="rmmdevices"]').length && rmmHtml) {
+            $target.html(rmmHtml);
+        }
+
+        // Always remove any jQuery blockUI overlay that might still be covering the view
+        var $dvi = $('div.detailViewInfo');
+        if ($dvi.length) {
+            try { $dvi.unblock(); } catch(e) {}
+        }
+        // Fallback: remove blockUI overlay elements directly
+        $dvi.find('.blockUI').remove();
+        $dvi.css({'opacity': '', 'pointer-events': ''});
+    }, 600);
+})(jQuery);
+</script>
+JS;
     }
 
     private function renderAlert(string $type, string $html): string
