@@ -392,13 +392,13 @@ JS;
         if ($rmmFrontendUrl !== '') {
             $hostname = (string)($agent['hostname'] ?? '');
             $trmmUrl  = addslashes(rtrim($rmmFrontendUrl, '/') . '/?search=' . urlencode($hostname));
-            $html .= '<button style="' . $bB . '" onclick="window.open(\'' . $trmmUrl . '\',\'_blank\')">TRMM</button>';
+            $html .= '<button style="' . $bB . '" onclick="window.open(\'' . $trmmUrl . '\',\'_blank\',\'noopener,noreferrer\')">TRMM</button>';
         }
 
         // TeamViewer button
         if ($tvId !== '') {
             $tvUrl = addslashes('https://start.teamviewer.com/' . urlencode($tvId));
-            $html .= '<button style="' . $bG . '" onclick="window.open(\'' . $tvUrl . '\',\'_blank\')">TeamViewer</button>';
+            $html .= '<button style="' . $bG . '" onclick="window.open(\'' . $tvUrl . '\',\'_blank\',\'noopener,noreferrer\')">TeamViewer</button>';
         }
 
         // Take Control button — only for non-offline agents
@@ -460,19 +460,66 @@ JS;
             ? ' <span style="font-size:11px;font-weight:normal;color:#888">&bull; Cache: ' . $cacheAge . 's</span>'
             : '';
 
-        $refreshBtn = '';
+        $refreshScript = '';
+        $refreshBtn    = '';
         if ($refreshUrl !== '') {
-            $jsUrl = addslashes($refreshUrl);
-            $refreshBtn = ' <button onclick="'
-                . 'var btn=this;btn.disabled=true;btn.textContent=\'...\';'
-                . 'jQuery.get(\'' . $jsUrl . '\','
-                . 'function(d){jQuery(\'div.details div.contents\').first().html(d);})'
-                . '.fail(function(){location.reload();});return false;"'
+            $refreshScript = <<<'JS'
+<script type="text/javascript">
+if (typeof rmmRefresh === 'undefined') {
+    function rmmRefresh(btn) {
+        var origText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '...';
+        // Prefer vtiger's own tab-click mechanism so the full tab reload path is used
+        var $tab = $('a[href*="RMMDevices"], .sideBarLinks a').filter(function(){
+            return $(this).text().indexOf('RMM') !== -1;
+        }).first();
+        if ($tab.length) {
+            $tab.trigger('click');
+            btn.disabled = false;
+            btn.textContent = origText;
+            return;
+        }
+        // Fallback: direct AJAX call with force_refresh
+        var record = (new URLSearchParams(window.location.search)).get('record')
+                     || $('input[name="record"]').val()
+                     || '';
+        if (!record) { window.location.reload(); return; }
+        $.ajax({
+            url: 'index.php',
+            data: {
+                module: 'RMMDevices',
+                view: 'Detail',
+                record: record,
+                mode: 'showRelatedList',
+                force_refresh: '1',
+                _: Date.now()
+            },
+            success: function(html) {
+                var $target = $('[data-rmm="rmmdevices"]')
+                              .closest('.contents, .contentsDiv');
+                if (!$target.length) {
+                    $target = $('div.details div.contents, div.contentsDiv div.contents').first();
+                }
+                if ($target.length) { $target.html(html); }
+                btn.disabled = false;
+                btn.textContent = origText;
+            },
+            error: function() {
+                window.location.reload();
+            }
+        });
+    }
+}
+</script>
+JS;
+            $refreshBtn = ' <button onclick="rmmRefresh(this);return false;"'
                 . ' style="font-size:11px;padding:2px 8px;cursor:pointer;background:#fff;'
                 . 'border:1px solid #bbb;border-radius:3px;margin-left:8px">&#8635; Aktualisieren</button>';
         }
 
-        return '<div style="font-size:13px;font-weight:bold;margin-bottom:8px;color:#333">'
+        return $refreshScript
+            . '<div style="font-size:13px;font-weight:bold;margin-bottom:8px;color:#333">'
             . $total . ' Agents'
             . ' &nbsp;|&nbsp; <span style="color:#2e7d32">' . $online  . ' Online</span>'
             . ' &nbsp;|&nbsp; <span style="color:#e65100">' . $overdue . ' Overdue</span>'
@@ -736,12 +783,27 @@ JS;
 
     private function sendAndExit(string $html): void
     {
-        // csrf-magic.js strips X-PJAX/X-Requested-With headers, causing isAjax()=false,
-        // which triggers triggerPreProcess() to buffer a full HTML page before our process()
-        // runs. Clean all output buffers so only our partial HTML reaches the browser.
+        // Clean all output buffers so only our partial HTML reaches the browser.
         while (ob_get_level() > 0) {
             ob_end_clean();
         }
+
+        // Detect whether this is an AJAX/tab request or a direct browser hit.
+        // mode=showRelatedList is vtiger's AJAX tab mechanism; X-Requested-With /
+        // X-PJAX are standard AJAX headers (stripped by csrf-magic.js in some
+        // setups, hence the mode check as primary signal).
+        $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+                  || !empty($_SERVER['HTTP_X_PJAX'])
+                  || (isset($_GET['mode']) && $_GET['mode'] === 'showRelatedList');
+
+        if (!$isAjax) {
+            $accountId = (int)(isset($_REQUEST['record']) ? $_REQUEST['record'] : 0);
+            if ($accountId > 0 && !headers_sent()) {
+                header('Location: index.php?module=Accounts&view=Detail&record=' . $accountId);
+                exit;
+            }
+        }
+
         if (!headers_sent()) {
             header('Content-Type: text/html; charset=UTF-8');
         }
