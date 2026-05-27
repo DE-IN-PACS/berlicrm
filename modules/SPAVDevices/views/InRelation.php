@@ -40,6 +40,7 @@ class SPAVDevices_InRelation_View extends Vtiger_RelatedList_View {
 
         $html = str_replace('data-device-count="0"', 'data-device-count="' . count($devices) . '"', $html);
         $html .= $this->renderSyncBar($accountId, $lastSync);
+        $html .= $this->renderLicenseSummary($devices);
         $html .= $this->renderTable($devices);
         $html .= $this->renderAutoSyncScript($accountId);
         $html .= $this->renderCountScript();
@@ -116,6 +117,69 @@ class SPAVDevices_InRelation_View extends Vtiger_RelatedList_View {
         if ($ago < 3600)   return 'Letzte Synchronisierung: vor ' . (int)($ago / 60) . ' Minuten';
         if ($ago < 86400)  return 'Letzte Synchronisierung: vor ' . (int)($ago / 3600) . ' Stunden';
         return 'Letzte Synchronisierung: vor ' . (int)($ago / 86400) . ' Tagen';
+    }
+
+    private function renderLicenseSummary(array $devices): string
+    {
+        if (empty($devices)) {
+            return '';
+        }
+
+        $total    = count($devices);
+        $licensed = 0;
+        $lost     = 0;
+        $byLicense = [];
+
+        foreach ($devices as $dev) {
+            $lic = trim((string)($dev['license_name'] ?? ''));
+            if ($dev['sync_status'] === 'lost') {
+                $lost++;
+                continue;
+            }
+            if ($lic !== '') {
+                $licensed++;
+                $byLicense[$lic] = ($byLicense[$lic] ?? 0) + 1;
+            }
+        }
+
+        $active    = $total - $lost;
+        $unlicensed = $active - $licensed;
+
+        // License-Breakdown Pills
+        arsort($byLicense);
+        $pills = '';
+        foreach ($byLicense as $name => $count) {
+            $pills .= '<span style="display:inline-block;background:#e8f0fe;color:#1a56db;'
+                    . 'border:1px solid #c3d4fb;border-radius:12px;padding:1px 10px;'
+                    . 'font-size:12px;margin-left:6px">'
+                    . htmlspecialchars($name) . '&nbsp;<strong>' . $count . '</strong></span>';
+        }
+        if ($unlicensed > 0) {
+            $pills .= '<span style="display:inline-block;background:#fef3cd;color:#856404;'
+                    . 'border:1px solid #fde68a;border-radius:12px;padding:1px 10px;'
+                    . 'font-size:12px;margin-left:6px">'
+                    . 'Ohne Lizenz&nbsp;<strong>' . $unlicensed . '</strong></span>';
+        }
+        if ($lost > 0) {
+            $pills .= '<span style="display:inline-block;background:#fde8e8;color:#9b1c1c;'
+                    . 'border:1px solid #f8b4b4;border-radius:12px;padding:1px 10px;'
+                    . 'font-size:12px;margin-left:6px">'
+                    . 'Nicht gefunden&nbsp;<strong>' . $lost . '</strong></span>';
+        }
+
+        $activeStr    = '<span style="color:#2e7d32;font-weight:bold">' . $active . ' aktiv</span>';
+        $licensedStr  = '<span style="color:#1a56db;font-weight:bold">' . $licensed . ' lizenziert</span>';
+
+        return '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;'
+             . 'margin-bottom:10px;padding:8px 12px;background:#f8f9fa;'
+             . 'border:1px solid #e0e0e0;border-radius:4px;font-size:13px">'
+             . '<span style="font-weight:bold;color:#333">' . $total . ' Geräte gesamt</span>'
+             . '<span style="color:#bbb;margin:0 4px">|</span>'
+             . $activeStr
+             . '<span style="color:#bbb;margin:0 4px">|</span>'
+             . $licensedStr
+             . $pills
+             . '</div>';
     }
 
     private function renderSyncBar(int $accountId, ?string $lastSync): string
