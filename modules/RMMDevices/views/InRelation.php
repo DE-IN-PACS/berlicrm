@@ -3,7 +3,7 @@ require_once __DIR__ . '/RMMDevicesHelper.php';
 
 class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
 
-    private const CACHE_VERSION = 4;
+    private const CACHE_VERSION = 5;
 
     private array  $debugLog = [];
     private string $logFile  = '';
@@ -16,7 +16,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         $this->log("=== RMM Tab | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
 
         [$rmm_url, $rmm_token, $rmm_frontend_url, $configError] = $this->loadConfig();
-        $html = '<div class="relatedContainer" data-rmm="rmmdevices" style="padding:12px">';
+        $html = '<div class="relatedContainer" data-rmm="rmmdevices" data-agent-count="0" style="padding:12px">';
 
         if ($configError) {
             $html .= $this->renderAlert('warning', $configError);
@@ -160,6 +160,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             ]);
         }
 
+        $html = str_replace('data-agent-count="0"', 'data-agent-count="' . count($agentList) . '"', $html);
         $html .= $this->renderTable($agentList, $tvFieldIds, $cacheAge, $refreshUrl, $rmm_frontend_url);
         $html .= $this->renderDebugPanel();
         $html .= '</div>';
@@ -522,10 +523,10 @@ JS;
                         break;
                     }
                 }
-                // RAM — try common field name variants
-                foreach (['used_ram', 'ram', 'used_memory', 'memory_usage'] as $key) {
-                    if (array_key_exists($key, $detail) && $detail[$key] !== null) {
-                        $agent['used_ram'] = $detail[$key];
+                // total_ram capacity (GB) — try common field name variants
+                foreach (['total_ram', 'ram_total', 'memory_total'] as $key) {
+                    if (array_key_exists($key, $detail) && $detail[$key] !== null && (int)$detail[$key] > 0) {
+                        $agent['total_ram'] = (int)$detail[$key];
                         break;
                     }
                 }
@@ -685,7 +686,8 @@ JS;
     // Snapshot the HTML of our content div while it is still in the DOM
     // (this script runs during jQuery's .html() call, so the element exists)
     var $rc = $('[data-rmm="rmmdevices"]').first();
-    var rmmHtml = $rc.length ? $rc.prop('outerHTML') : '';
+    var rmmHtml    = $rc.length ? $rc.prop('outerHTML') : '';
+    var agentCount = $rc.length ? parseInt($rc.attr('data-agent-count') || '-1', 10) : -1;
 
     // After a short delay, check whether the content actually made it into the
     // visible content holder and remove any blocking overlay if needed.
@@ -698,6 +700,24 @@ JS;
         // If our content is not yet in the target container, force-insert it
         if ($target.length && !$target.find('[data-rmm="rmmdevices"]').length && rmmHtml) {
             $target.html(rmmHtml);
+        }
+
+        // Update the sidebar tab label: "RMM Geräte" → "RMM Geräte (N)"
+        if (agentCount >= 0) {
+            $('a, span, li').each(function() {
+                for (var i = 0; i < this.childNodes.length; i++) {
+                    var node = this.childNodes[i];
+                    if (node.nodeType === 3 && node.nodeValue.indexOf('RMM') !== -1) {
+                        var updated = node.nodeValue.replace(
+                            /RMM\s+Geräte(\s*\(\d+\))?/,
+                            'RMM Geräte (' + agentCount + ')'
+                        );
+                        if (updated !== node.nodeValue) {
+                            node.nodeValue = updated;
+                        }
+                    }
+                }
+            });
         }
 
         // Always remove any jQuery blockUI overlay that might still be covering the view
