@@ -65,7 +65,7 @@ WHERE NOT EXISTS (
 INSERT INTO `vtiger_relatedlists`
     (`relation_id`, `tabid`, `related_tabid`, `name`, `sequence`, `label`, `presence`, `actions`)
 SELECT
-    (SELECT `id` + 1 FROM `vtiger_relatedlists_seq`)             AS relation_id,
+    (SELECT MAX(r3.`relation_id`) + 1 FROM `vtiger_relatedlists` r3) AS relation_id,
     (SELECT `tabid` FROM `vtiger_tab` WHERE `name` = 'Accounts') AS tabid,
     (SELECT `tabid` FROM `vtiger_tab` WHERE `name` = 'SPAVDevices') AS related_tabid,
     'get_spav_devices',
