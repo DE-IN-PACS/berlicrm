@@ -1488,6 +1488,13 @@ class Accounts extends CRMEntity {
 	function get_rmmdevices($id, $cur_tab_id, $rel_tab_id, $actions = false) {
 		return ['query' => 'SELECT vtiger_crmentity.crmid FROM vtiger_crmentity WHERE 0=1'];
 	}
+
+	// Placeholder for Securepoint AV Portal related tab – actual data is loaded live via
+	// modules/SPAVDevices/views/List.php. This stub is required because
+	// vtiger calls $accountsFocus->get_spav_devices() to compute the tab badge count.
+	function get_spav_devices($id, $cur_tab_id, $rel_tab_id, $actions = false) {
+		return ['query' => 'SELECT vtiger_crmentity.crmid FROM vtiger_crmentity WHERE 0=1'];
+	}
 }
 
 ?>
