@@ -3,7 +3,8 @@ require_once __DIR__ . '/RMMDevicesHelper.php';
 
 class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
 
-    private const CACHE_VERSION = 5;
+    private const CACHE_VERSION = 6;
+    // Increase to auto-invalidate cache. Delete logs/rmm_cache_*.json after deploy.
 
     private array  $debugLog = [];
     private string $logFile  = '';
@@ -13,7 +14,6 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         error_log('RMMDevices_InRelation_View::process CALLED record=' . $request->get('record'));
 
         $accountId = (int) $request->get('record');
-
         $this->log("=== RMM Tab | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
 
         [$rmm_url, $rmm_token, $rmm_frontend_url, $configError] = $this->loadConfig();
@@ -23,7 +23,8 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             $html .= $this->renderAlert('warning', $configError);
             $html .= $this->renderDebugPanel();
             $html .= '</div>';
-            $this->sendAndExit($html);
+            $this->outputHtml($html, $request);
+            return;
         }
 
         $accountNo = $this->getAccountNo($accountId);
@@ -31,18 +32,17 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             $html .= $this->renderAlert('info', 'Keine Account-Nummer (account_no) für diesen Datensatz gefunden.');
             $html .= $this->renderDebugPanel();
             $html .= '</div>';
-            $this->sendAndExit($html);
+            $this->outputHtml($html, $request);
+            return;
         }
         $this->log("account_no='{$accountNo}'");
 
-        // Refresh-URL für den "Aktualisieren"-Button
         $refreshUrl = 'index.php?module=' . urlencode($request->getModule())
             . '&view=Detail&mode=showRelatedList&relatedModule=RMMDevices'
             . '&record=' . urlencode((string)$accountId)
             . '&tab_label=' . urlencode((string)$request->get('tab_label'))
             . '&force_refresh=1';
 
-        // ── Cache-Check ──────────────────────────────────────────────────────
         $forceRefresh = ((string)$request->get('force_refresh') === '1');
         $cached       = $forceRefresh ? null : $this->loadCache($accountNo);
         $cacheAge     = -1;
@@ -54,30 +54,26 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             $cacheAge   = time() - (int)($cached['ts']    ?? 0);
             $this->log("Cache genutzt (Alter: {$cacheAge}s, " . count($agentList) . " Agents)");
         } else {
-            // ── Step 1: Custom Field-Definitionen ────────────────────────────
-            [$cfDefs, $err]  = $this->rmmGet(rtrim($rmm_url, '/') . '/core/customfields/', $rmm_token);
-            $siteFieldIds    = [];
-            $clientFieldIds  = [];
+            [$cfDefs, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/core/customfields/', $rmm_token);
+            $siteFieldIds   = [];
+            $clientFieldIds = [];
             if ($err === null && is_array($cfDefs)) {
                 $cfList = $cfDefs['results'] ?? $cfDefs;
                 foreach ($cfList as $cf) {
                     if (!is_array($cf)) continue;
-                    $cfName  = strtolower(trim((string)($cf['name'] ?? '')));
-                    $cfId    = isset($cf['id']) ? (int)$cf['id'] : null;
+                    $cfName  = strtolower(trim((string)($cf['name']  ?? '')));
+                    $cfId    = isset($cf['id'])    ? (int)$cf['id']   : null;
                     $cfModel = strtolower(trim((string)($cf['model'] ?? '')));
                     if ($cfId === null) continue;
                     if ($cfName === 'berlicrm_id') {
                         if ($cfModel === 'site')   $siteFieldIds[]   = $cfId;
                         if ($cfModel === 'client') $clientFieldIds[] = $cfId;
                     }
-                    if ($cfName === 'teamviewerclientid') {
-                        $tvFieldIds[] = $cfId;
-                    }
+                    if ($cfName === 'teamviewerclientid') $tvFieldIds[] = $cfId;
                 }
             }
             $this->log("fieldIds: client=[" . implode(',', $clientFieldIds) . "] site=[" . implode(',', $siteFieldIds) . "] tv=[" . implode(',', $tvFieldIds) . "]");
 
-            // ── Step 2: Verknüpften Client/Site finden ───────────────────────
             $trmClientId = null;
             $trmSiteId   = null;
 
@@ -88,7 +84,8 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
                     $html .= $this->renderAlert('danger', 'TacticalRMM /clients/sites/ nicht erreichbar: ' . htmlspecialchars($err));
                     $html .= $this->renderDebugPanel();
                     $html .= '</div>';
-                    $this->sendAndExit($html);
+                    $this->outputHtml($html, $request);
+                    return;
                 }
                 $siteList = $sitesData['results'] ?? $sitesData;
                 $this->log("Sites geladen: " . count((array)$siteList));
@@ -112,7 +109,8 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
                     $html .= $this->renderAlert('danger', 'TacticalRMM /clients/ nicht erreichbar: ' . htmlspecialchars($err));
                     $html .= $this->renderDebugPanel();
                     $html .= '</div>';
-                    $this->sendAndExit($html);
+                    $this->outputHtml($html, $request);
+                    return;
                 }
                 $clientList = $clientsData['results'] ?? $clientsData;
                 foreach ((array)$clientList as $client) {
@@ -134,10 +132,10 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
                     . htmlspecialchars($accountNo) . '</strong> nicht gefunden).');
                 $html .= $this->renderDebugPanel();
                 $html .= '</div>';
-                $this->sendAndExit($html);
+                $this->outputHtml($html, $request);
+                return;
             }
 
-            // ── Step 3: Agents laden + anreichern ────────────────────────────
             $agentsUrl = $trmSiteId !== null
                 ? rtrim($rmm_url, '/') . '/agents/?site='   . $trmSiteId
                 : rtrim($rmm_url, '/') . '/agents/?client=' . $trmClientId;
@@ -148,7 +146,8 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
                 $html .= $this->renderAlert('danger', 'Fehler beim Laden der Agents: ' . htmlspecialchars($err));
                 $html .= $this->renderDebugPanel();
                 $html .= '</div>';
-                $this->sendAndExit($html);
+                $this->outputHtml($html, $request);
+                return;
             }
             $agentList = array_values((array)($agentsData['results'] ?? $agentsData));
             $this->log("Agents geladen: " . count($agentList));
@@ -165,10 +164,31 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         $html .= $this->renderTable($agentList, $tvFieldIds, $cacheAge, $refreshUrl, $rmm_frontend_url);
         $html .= $this->renderDebugPanel();
         $html .= '</div>';
-        $this->sendAndExit($html);
+        $this->outputHtml($html, $request);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function outputHtml(string $html, Vtiger_Request $request): void
+    {
+        $mode   = isset($_GET['mode']) ? (string)$_GET['mode'] : '';
+        $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+               || !empty($_SERVER['HTTP_X_PJAX'])
+               || ($mode === 'showRelatedList');
+
+        if ($isAjax) {
+            echo $html;
+            return;
+        }
+
+        try {
+            $viewer = $this->getViewer($request);
+            $viewer->assign('RMM_HTML', $html);
+            $viewer->view('RMMDevicesTab.tpl', 'RMMDevices');
+        } catch (Exception $e) {
+            echo $html;
+        }
+    }
 
     private function matchField(array $cf, array $fieldIds, string $accountNo): bool
     {
@@ -241,11 +261,11 @@ HTML;
         $tdc = $td . ';text-align:center';
 
         $html  = $this->renderSummary($list, $cacheAge, $refreshUrl);
+        $html .= $this->renderFilterBar();
         $html .= $this->renderTakeControlScript();
         $html .= '<table class="table table-bordered listViewEntriesTable" style="width:100%;border-collapse:collapse;font-size:13px">';
         $html .= '<thead><tr class="listViewHeaders" style="background:#f5f5f5">';
 
-        // [label, sort-key or null]
         $headers = [
             ['Status',          null],
             ['Hostname',        'hostname'],
@@ -276,21 +296,20 @@ HTML;
             $rawStatus = (string)($agent['status'] ?? '');
             $hostname  = (string)($agent['hostname'] ?? '');
             $lanIp     = $this->extractLanIp($agent);
-            $os        = htmlspecialchars($this->shortenOs((string)($agent['operating_system'] ?? $agent['plat'] ?? '')));
-            $serial    = htmlspecialchars($this->extractSerial($agent));
+            $osRaw     = $this->shortenOs((string)($agent['operating_system'] ?? $agent['plat'] ?? ''));
+            $os        = htmlspecialchars($osRaw);
+            $serialRaw = $this->extractSerial($agent);
+            $serial    = htmlspecialchars($serialRaw);
             $tvId      = $this->extractTeamViewerId($agent, $tvFieldIds);
             $lastSeen  = htmlspecialchars($this->formatLastSeen((string)($agent['last_seen'] ?? $agent['last_alert_time'] ?? '')));
 
-            // RAM capacity (GB, no percentage)
             $totalRam = isset($agent['total_ram']) ? (int)$agent['total_ram'] : null;
             $ramHtml  = $totalRam !== null
                 ? htmlspecialchars($totalRam . ' GB')
                 : '<span style="color:#999">&#8211;</span>';
 
-            // Disk checks → [html, maxUsedPct]
             [$diskHtml, $diskMaxPct] = $this->renderDiskChecks($agent);
 
-            // Patches pending
             $hasPatch = isset($agent['has_patches_pending']) ? (bool)$agent['has_patches_pending'] : null;
             if ($hasPatch === true) {
                 $patchHtml    = '<span style="color:#e65100;font-weight:bold">&#9888; Ja</span>';
@@ -303,28 +322,29 @@ HTML;
             [$statusLabel, $statusStyle] = $this->statusLabel($rawStatus);
             $actionsHtml = $this->renderActionButtons($agent, $rmmFrontendUrl, $tvId);
 
-            // Sort values
             $hostSortVal = htmlspecialchars(strtolower($hostname));
             $ipSortVal   = htmlspecialchars($this->ipSortVal($lanIp));
             $diskSortVal = str_pad((string)$diskMaxPct, 3, '0', STR_PAD_LEFT);
 
             $html .= '<tr class="listViewEntries" style="border-bottom:1px solid #eee">';
-            $html .= '<td style="' . $td . '"><span style="' . $statusStyle . '">' . $statusLabel . '</span></td>';
-            $html .= '<td style="' . $td . '" data-col="hostname" data-val="' . $hostSortVal . '">' . htmlspecialchars($hostname) . '</td>';
-            $html .= '<td style="' . $td . '" data-col="lanip"    data-val="' . $ipSortVal   . '">' . htmlspecialchars($lanIp)   . '</td>';
-            $html .= '<td style="' . $td . '">' . $os . '</td>';
+            $html .= '<td style="' . $td . '" data-status="' . htmlspecialchars(strtolower($rawStatus)) . '"><span style="' . $statusStyle . '">' . $statusLabel . '</span></td>';
+            $html .= '<td style="' . $td . '" data-col="hostname" data-val="' . $hostSortVal . '" data-hostname="' . $hostSortVal . '" data-serial="' . htmlspecialchars(strtolower($serialRaw)) . '">' . htmlspecialchars($hostname) . '</td>';
+            $html .= '<td style="' . $td . '" data-col="lanip"    data-val="' . $ipSortVal . '">' . htmlspecialchars($lanIp) . '</td>';
+            $html .= '<td style="' . $td . '" data-os="' . htmlspecialchars($osRaw) . '">' . $os . '</td>';
             $html .= '<td style="' . $td . '">' . $serial . '</td>';
             $html .= '<td style="' . $td . '">' . htmlspecialchars($tvId) . '</td>';
             $html .= '<td style="' . $td . ';white-space:nowrap">' . $lastSeen . '</td>';
             $html .= '<td style="' . $tdc . '">' . $ramHtml . '</td>';
-            $html .= '<td style="' . $td . '" data-col="disks"   data-val="' . $diskSortVal   . '">' . $diskHtml   . '</td>';
-            $html .= '<td style="' . $tdc . '" data-col="patches" data-val="' . $patchSortVal . '">' . $patchHtml  . '</td>';
+            $html .= '<td style="' . $td . '" data-col="disks"   data-val="' . $diskSortVal . '">' . $diskHtml . '</td>';
+            $html .= '<td style="' . $tdc . '" data-col="patches" data-val="' . $patchSortVal . '" data-patches="' . $patchSortVal . '">' . $patchHtml . '</td>';
             $html .= '<td style="' . $td . ';white-space:nowrap">' . $actionsHtml . '</td>';
             $html .= '</tr>';
         }
 
         $html .= '</tbody></table>';
         $html .= $this->renderSortScript();
+        $html .= $this->renderFilterScript();
+        $html .= $this->renderSelfInsertScript();
         return $html;
     }
 
@@ -337,6 +357,119 @@ HTML;
             $padded[] = str_pad((string)(int)$p, 3, '0', STR_PAD_LEFT);
         }
         return implode('.', $padded);
+    }
+
+    private function renderFilterBar(): string
+    {
+        return <<<'HTML'
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+  <input  id="rmm-filter-text" type="text" placeholder="Hostname / Seriennummer..."
+          style="font-size:12px;padding:4px 8px;border:1px solid #ccc;border-radius:3px;width:200px">
+  <select id="rmm-filter-os"
+          style="font-size:12px;padding:4px 6px;border:1px solid #ccc;border-radius:3px">
+    <option value="">Alle OS</option>
+  </select>
+  <select id="rmm-filter-patches"
+          style="font-size:12px;padding:4px 6px;border:1px solid #ccc;border-radius:3px">
+    <option value="">Alle Patches</option>
+    <option value="1">Patches offen</option>
+    <option value="0">Ok</option>
+  </select>
+  <select id="rmm-filter-status"
+          style="font-size:12px;padding:4px 6px;border:1px solid #ccc;border-radius:3px">
+    <option value="">Alle Status</option>
+    <option value="online">Online</option>
+    <option value="overdue">Overdue</option>
+    <option value="offline">Offline</option>
+  </select>
+  <button id="rmm-filter-reset"
+          style="font-size:12px;padding:4px 10px;cursor:pointer;background:#f0f0f0;border:1px solid #ccc;border-radius:3px">
+    &#x2715; Zur&uuml;cksetzen
+  </button>
+  <span   id="rmm-filter-count" style="font-size:12px;color:#888;margin-left:4px"></span>
+</div>
+HTML;
+    }
+
+    private function renderFilterScript(): string
+    {
+        return <<<'JS'
+<script type="text/javascript">
+(function(){
+    function populateOsFilter() {
+        var seen = {};
+        var opts = [];
+        document.querySelectorAll('td[data-os]').forEach(function(td){
+            var v = td.getAttribute('data-os');
+            if (v && !seen[v]) { seen[v] = true; opts.push(v); }
+        });
+        opts.sort();
+        var sel = document.getElementById('rmm-filter-os');
+        if (!sel) return;
+        sel.innerHTML = '<option value="">Alle OS</option>';
+        opts.forEach(function(v){
+            var opt = document.createElement('option');
+            opt.value = v; opt.textContent = v;
+            sel.appendChild(opt);
+        });
+    }
+
+    function ga(row, sel, attr) {
+        var td = row.querySelector(sel);
+        return td ? (td.getAttribute(attr) || '') : '';
+    }
+
+    function applyFilter() {
+        var text    = (document.getElementById('rmm-filter-text').value    || '').toLowerCase().trim();
+        var os      =  document.getElementById('rmm-filter-os').value      || '';
+        var patches =  document.getElementById('rmm-filter-patches').value;
+        var status  =  document.getElementById('rmm-filter-status').value  || '';
+
+        var rows = document.querySelectorAll('table.listViewEntriesTable tbody tr');
+        var visible = 0;
+        rows.forEach(function(row){
+            var hn = ga(row, 'td[data-hostname]', 'data-hostname');
+            var sr = ga(row, 'td[data-serial]',   'data-serial');
+            var ov = ga(row, 'td[data-os]',       'data-os');
+            var pv = ga(row, 'td[data-patches]',  'data-patches');
+            var sv = ga(row, 'td[data-status]',   'data-status');
+
+            var match = true;
+            if (text    && hn.indexOf(text) === -1 && sr.indexOf(text) === -1) match = false;
+            if (os      && ov !== os)                                           match = false;
+            if (patches !== '' && pv !== patches)                               match = false;
+            if (status  && sv !== status)                                       match = false;
+
+            row.style.display = match ? '' : 'none';
+            if (match) visible++;
+        });
+        var c = document.getElementById('rmm-filter-count');
+        if (c) c.textContent = visible + ' von ' + rows.length + ' Geräten';
+    }
+
+    function resetFilter() {
+        document.getElementById('rmm-filter-text').value    = '';
+        document.getElementById('rmm-filter-os').value      = '';
+        document.getElementById('rmm-filter-patches').value = '';
+        document.getElementById('rmm-filter-status').value  = '';
+        applyFilter();
+    }
+
+    setTimeout(function(){
+        populateOsFilter();
+        var txt = document.getElementById('rmm-filter-text');
+        if (txt) txt.addEventListener('input', applyFilter);
+        ['rmm-filter-os', 'rmm-filter-patches', 'rmm-filter-status'].forEach(function(id){
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('change', applyFilter);
+        });
+        var btn = document.getElementById('rmm-filter-reset');
+        if (btn) btn.addEventListener('click', resetFilter);
+        applyFilter();
+    }, 150);
+})();
+</script>
+JS;
     }
 
     private function renderSortScript(): string
@@ -358,18 +491,15 @@ HTML;
             document.querySelectorAll('th[data-col]').forEach(function(t){
                 t.querySelector('.sort-arrow').textContent = ' ↕';
             });
-            th.querySelector('.sort-arrow').textContent =
-                currentDir === 'asc' ? ' ↑' : ' ↓';
+            th.querySelector('.sort-arrow').textContent = currentDir === 'asc' ? ' ↑' : ' ↓';
             var tbody = th.closest('table').querySelector('tbody');
             var rows  = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
             rows.sort(function(a, b){
-                var aVal = '';
-                var bVal = '';
                 var aTd = a.querySelector('td[data-col="' + col + '"]');
                 var bTd = b.querySelector('td[data-col="' + col + '"]');
-                if (aTd) aVal = aTd.getAttribute('data-val') || '';
-                if (bTd) bVal = bTd.getAttribute('data-val') || '';
-                var cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+                var aVal = aTd ? (aTd.getAttribute('data-val') || '') : '';
+                var bVal = bTd ? (bTd.getAttribute('data-val') || '') : '';
+                var cmp  = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
                 return currentDir === 'asc' ? cmp : -cmp;
             });
             rows.forEach(function(r){ tbody.appendChild(r); });
@@ -389,20 +519,17 @@ JS;
 
         $html = '';
 
-        // TRMM button — link to web UI filtered by hostname
         if ($rmmFrontendUrl !== '') {
             $hostname = (string)($agent['hostname'] ?? '');
             $trmmUrl  = addslashes(rtrim($rmmFrontendUrl, '/') . '/?search=' . urlencode($hostname));
             $html .= '<button style="' . $bB . '" onclick="window.open(\'' . $trmmUrl . '\',\'_blank\',\'noopener,noreferrer\')">TRMM</button>';
         }
 
-        // TeamViewer button
         if ($tvId !== '') {
             $tvUrl = addslashes('https://start.teamviewer.com/' . urlencode($tvId));
             $html .= '<button style="' . $bG . '" onclick="window.open(\'' . $tvUrl . '\',\'_blank\',\'noopener,noreferrer\')">TeamViewer</button>';
         }
 
-        // Take Control button — only for non-offline agents
         if (strtolower((string)($agent['status'] ?? '')) !== 'offline') {
             $agentId = addslashes((string)($agent['agent_id'] ?? $agent['id'] ?? ''));
             $html .= '<button style="' . $bO . '" onclick="rmmTakeControl(this,\'' . $agentId . '\')">Take Control</button>';
@@ -468,45 +595,40 @@ JS;
 <script type="text/javascript">
 if (typeof rmmRefresh === 'undefined') {
     function rmmRefresh(btn) {
-        var origText = btn.textContent;
         btn.disabled = true;
         btn.textContent = '...';
-        // Prefer vtiger's own tab-click mechanism so the full tab reload path is used
-        var $tab = $('a[href*="RMMDevices"], .sideBarLinks a').filter(function(){
-            return $(this).text().indexOf('RMM') !== -1;
+        var $tab = $('a').filter(function(){
+            return $(this).text().replace(/\s*\(\d+\)/,'').trim() === 'RMM Geräte';
         }).first();
         if ($tab.length) {
             $tab.trigger('click');
-            btn.disabled = false;
-            btn.textContent = origText;
+            setTimeout(function(){
+                btn.disabled = false;
+                btn.textContent = '↻ Aktualisieren';
+            }, 2000);
             return;
         }
-        // Fallback: direct AJAX call with force_refresh
-        var record = (new URLSearchParams(window.location.search)).get('record')
-                     || $('input[name="record"]').val()
-                     || '';
-        if (!record) { window.location.reload(); return; }
+        var record = new URLSearchParams(window.location.search).get('record') || '';
+        if (!record) { btn.disabled = false; return; }
         $.ajax({
             url: 'index.php',
             data: {
-                module: 'Accounts',
-                view:   'RMMTab',
+                module: 'RMMDevices',
+                view:   'Detail',
                 record: record,
+                mode:   'showRelatedList',
                 force_refresh: '1',
                 _: Date.now()
             },
-            success: function(html) {
-                var $target = $('[data-rmm="rmmdevices"]')
-                              .closest('.contents, .contentsDiv');
-                if (!$target.length) {
-                    $target = $('div.details div.contents, div.contentsDiv div.contents').first();
-                }
-                if ($target.length) { $target.html(html); }
+            success: function(html){
+                var $wrap = $('[data-rmm="rmmdevices"]').closest('.listViewContents, .contents');
+                if ($wrap.length) $wrap.html(html);
                 btn.disabled = false;
-                btn.textContent = origText;
+                btn.textContent = '↻ Aktualisieren';
             },
-            error: function() {
-                window.location.reload();
+            error: function(){
+                btn.disabled = false;
+                btn.textContent = '↻ Aktualisieren';
             }
         });
     }
@@ -528,12 +650,38 @@ JS;
             . '</div>';
     }
 
+    private function renderSelfInsertScript(): string
+    {
+        return <<<'JS'
+<script type="text/javascript">
+(function($){
+    setTimeout(function(){
+        var $dvi = $('div.detailViewInfo');
+        if ($dvi.length) {
+            try { $dvi.unblock(); } catch(e) {}
+        }
+        $dvi.find('.blockUI').remove();
+        $dvi.css({'opacity': '', 'pointer-events': ''});
+
+        var agentCount = $('[data-rmm="rmmdevices"]').data('agent-count');
+        if (agentCount !== undefined) {
+            $('a, span').contents().filter(function(){
+                return this.nodeType === 3
+                    && this.nodeValue.replace(/\s*\(\d+\)/, '').trim() === 'RMM Geräte';
+            }).each(function(){
+                this.nodeValue = 'RMM Geräte (' + agentCount + ')';
+            });
+        }
+    }, 400);
+})(jQuery);
+</script>
+JS;
+    }
+
     private function extractLanIp(array $agent): string
     {
         $val = $agent['local_ips'] ?? $agent['ip_addresses'] ?? $agent['lanip'] ?? '';
-        if (is_array($val)) {
-            $val = implode(', ', $val);
-        }
+        if (is_array($val)) $val = implode(', ', $val);
         $val = trim((string)$val);
         if (strpos($val, ',') !== false) {
             $parts = explode(',', $val);
@@ -553,7 +701,6 @@ JS;
 
             $base = rtrim($rmm_url, '/') . '/agents/' . $agentId;
 
-            // ── Agent-Detail: custom_fields, CPU, RAM ─────────────────────────
             [$detail, $err] = $this->rmmGet($base . '/', $rmm_token);
             if ($err === null && is_array($detail)) {
                 if (!$loggedDetailKeys) {
@@ -563,14 +710,12 @@ JS;
                 if (!empty($detail['custom_fields'])) {
                     $agent['custom_fields'] = $detail['custom_fields'];
                 }
-                // CPU — try common field name variants
                 foreach (['cpu_load', 'cpu', 'cpu_usage'] as $key) {
                     if (array_key_exists($key, $detail) && $detail[$key] !== null) {
                         $agent['cpu_load'] = $detail[$key];
                         break;
                     }
                 }
-                // total_ram capacity (GB) — try common field name variants
                 foreach (['total_ram', 'ram_total', 'memory_total'] as $key) {
                     if (array_key_exists($key, $detail) && $detail[$key] !== null && (int)$detail[$key] > 0) {
                         $agent['total_ram'] = (int)$detail[$key];
@@ -579,7 +724,6 @@ JS;
                 }
             }
 
-            // ── Checks: disk space ────────────────────────────────────────────
             [$checks, $err2] = $this->rmmGet($base . '/checks/', $rmm_token);
             if ($err2 === null && is_array($checks)) {
                 $checkList = isset($checks['results']) ? $checks['results'] : $checks;
@@ -604,9 +748,7 @@ JS;
 
     private function extractSerial(array $agent): string
     {
-        if (!empty($agent['serial_number'])) {
-            return (string)$agent['serial_number'];
-        }
+        if (!empty($agent['serial_number'])) return (string)$agent['serial_number'];
         if (isset($agent['wmi_detail']['serial_number']) && $agent['wmi_detail']['serial_number'] !== '') {
             return (string)$agent['wmi_detail']['serial_number'];
         }
@@ -619,16 +761,10 @@ JS;
                   ? $agent['custom_fields'] : [];
         foreach ($fields as $cf) {
             if (!is_array($cf)) continue;
-            // Name-based format: {"name": "TeamViewerClientID", "value": "..."}
             $name = strtolower(trim((string)($cf['name'] ?? $cf['field_name'] ?? '')));
-            if ($name === 'teamviewerclientid') {
-                return (string)($cf['value'] ?? '');
-            }
-            // ID-based format: {"field": 5, "value": "..."} — match against known field IDs
+            if ($name === 'teamviewerclientid') return (string)($cf['value'] ?? '');
             if (!empty($tvFieldIds) && isset($cf['field']) && is_numeric($cf['field'])) {
-                if (in_array((int)$cf['field'], $tvFieldIds, true)) {
-                    return (string)($cf['value'] ?? '');
-                }
+                if (in_array((int)$cf['field'], $tvFieldIds, true)) return (string)($cf['value'] ?? '');
             }
         }
         return '';
@@ -648,33 +784,25 @@ JS;
 
     private function renderDiskChecks(array $agent): array
     {
-        $sortable = []; // key = drive letter, value = html
+        $sortable = [];
         $maxPct   = 0;
 
-        // Primary: checks_detail from /agents/{id}/checks/
         $allChecks = isset($agent['checks_detail']) && is_array($agent['checks_detail'])
                      ? $agent['checks_detail'] : [];
 
         foreach ($allChecks as $check) {
             if (!is_array($check)) continue;
-
-            // Identify disk checks via readable_desc or presence of 'disk' field
             $rdesc  = (string)($check['readable_desc'] ?? '');
             $isDisk = stripos($rdesc, 'disk') !== false
                    || (isset($check['disk']) && (string)$check['disk'] !== '');
             if (!$isDisk) continue;
 
-            // Drive letter from readable_desc: "Disk Space Check: Drive C: - ..."
             $drive = 'Disk';
-            if (preg_match('/Drive\s+([^:\s]+:)/i', $rdesc, $dm)) {
-                $drive = trim($dm[1]);
-            }
+            if (preg_match('/Drive\s+([^:\s]+:)/i', $rdesc, $dm)) $drive = trim($dm[1]);
 
-            // more_info + status live inside check_result
             $moreInfo = (string)($check['check_result']['more_info'] ?? '');
             $status   = strtolower((string)($check['check_result']['status'] ?? 'passing'));
 
-            // Calculate used% from "Total: 237.3 GB, Free: 140.1 GB"
             $pct = 0;
             if (preg_match('/Total:\s*([\d.]+)\s*GB,\s*Free:\s*([\d.]+)\s*GB/i', $moreInfo, $m)) {
                 $total = (float)$m[1];
@@ -683,14 +811,11 @@ JS;
             }
             if ($pct > $maxPct) $maxPct = $pct;
 
-            $isPassing   = ($status === 'passing');
-            $icon        = $isPassing ? '&#10003;' : '&#9888;';
-            $color       = $isPassing ? 'color:#2e7d32' : 'color:#c62828';
-            $sortable[$drive] = '<span style="' . $color . '">'
-                . htmlspecialchars($drive) . ' ' . $pct . '% ' . $icon . '</span>';
+            $isPassing        = ($status === 'passing');
+            $sortable[$drive] = '<span style="' . ($isPassing ? 'color:#2e7d32' : 'color:#c62828') . '">'
+                . htmlspecialchars($drive) . ' ' . $pct . '% ' . ($isPassing ? '&#10003;' : '&#9888;') . '</span>';
         }
 
-        // Fallback: agent['disks'] from agent listing (percent field)
         if (empty($sortable) && !empty($agent['disks']) && is_array($agent['disks'])) {
             foreach ($agent['disks'] as $disk) {
                 if (!is_array($disk)) continue;
@@ -698,19 +823,15 @@ JS;
                 $pct    = isset($disk['percent']) ? (int)$disk['percent'] : null;
                 if ($pct !== null) {
                     if ($pct > $maxPct) $maxPct = $pct;
-                    $icon    = $pct >= 85 ? '&#9888;' : '&#10003;';
-                    $color   = $pct >= 85 ? 'color:#c62828' : 'color:#2e7d32';
-                    $sortable[$device] = '<span style="' . $color . '">'
-                        . htmlspecialchars($device) . ' ' . $pct . '% ' . $icon . '</span>';
+                    $sortable[$device] = '<span style="' . ($pct >= 85 ? 'color:#c62828' : 'color:#2e7d32') . '">'
+                        . htmlspecialchars($device) . ' ' . $pct . '% ' . ($pct >= 85 ? '&#9888;' : '&#10003;') . '</span>';
                 } else {
                     $sortable[$device] = htmlspecialchars($device);
                 }
             }
         }
 
-        if (empty($sortable)) {
-            return ['<span style="color:#999">&#8211;</span>', 0];
-        }
+        if (empty($sortable)) return ['<span style="color:#999">&#8211;</span>', 0];
         ksort($sortable);
         return [implode('<br>', array_values($sortable)), $maxPct];
     }
@@ -725,105 +846,6 @@ JS;
         }
     }
 
-    private function renderSelfInsertScript(): string
-    {
-        return <<<'JS'
-<script type="text/javascript">
-(function($){
-    // Snapshot the HTML of our content div while it is still in the DOM
-    // (this script runs during jQuery's .html() call, so the element exists)
-    var $rc = $('[data-rmm="rmmdevices"]').first();
-    var rmmHtml    = $rc.length ? $rc.prop('outerHTML') : '';
-    var agentCount = $rc.length ? parseInt($rc.attr('data-agent-count') || '-1', 10) : -1;
-
-    // After a short delay, check whether the content actually made it into the
-    // visible content holder and remove any blocking overlay if needed.
-    setTimeout(function(){
-        var $target = $('div.details div.contents').first();
-        if (!$target.length) {
-            $target = $('div.contentsDiv div.contents, div.contents').first();
-        }
-
-        // If our content is not yet in the target container, force-insert it
-        if ($target.length && !$target.find('[data-rmm="rmmdevices"]').length && rmmHtml) {
-            $target.html(rmmHtml);
-        }
-
-        // Update the sidebar tab label: "RMM Geräte" → "RMM Geräte (N)"
-        if (agentCount >= 0) {
-            $('a, span, li').each(function() {
-                for (var i = 0; i < this.childNodes.length; i++) {
-                    var node = this.childNodes[i];
-                    if (node.nodeType === 3 && node.nodeValue.indexOf('RMM') !== -1) {
-                        var updated = node.nodeValue.replace(
-                            /RMM\s+Geräte(\s*\(\d+\))?/,
-                            'RMM Geräte (' + agentCount + ')'
-                        );
-                        if (updated !== node.nodeValue) {
-                            node.nodeValue = updated;
-                        }
-                    }
-                }
-            });
-        }
-
-        // Always remove any jQuery blockUI overlay that might still be covering the view
-        var $dvi = $('div.detailViewInfo');
-        if ($dvi.length) {
-            try { $dvi.unblock(); } catch(e) {}
-        }
-        // Fallback: remove blockUI overlay elements directly
-        $dvi.find('.blockUI').remove();
-        $dvi.css({'opacity': '', 'pointer-events': ''});
-
-        // If page was loaded via #rmm-tab redirect: clean hash, then re-click the tab
-        // so vtiger registers it as the active tab in its own state
-        if (window.location.hash === '#rmm-tab') {
-            history.replaceState(null, '', window.location.pathname + window.location.search);
-            setTimeout(function(){
-                $('a').filter(function(){
-                    return $(this).text().replace(/\s*\(\d+\)/, '').trim() === 'RMM Geräte';
-                }).first().trigger('click');
-            }, 800);
-        }
-    }, 600);
-})(jQuery);
-</script>
-JS;
-    }
-
-    private function sendAndExit(string $html): void
-    {
-        while (ob_get_level() > 0) {
-            ob_end_clean();
-        }
-
-        $mode   = isset($_GET['mode']) ? (string)$_GET['mode'] : '';
-        $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
-               || !empty($_SERVER['HTTP_X_PJAX']);
-        $isTab  = ($mode === 'showRelatedList') || $isAjax;
-
-        $accountId = (int)(isset($_REQUEST['record']) ? $_REQUEST['record'] : 0);
-
-        if (!$isTab && $accountId > 0) {
-            // Direct browser hit — redirect to full Account view and activate the RMM tab via hash
-            $redirectUrl = 'index.php?module=Accounts&view=Detail&record=' . $accountId . '#rmm-tab';
-            if (!headers_sent()) {
-                header('Content-Type: text/html; charset=UTF-8');
-            }
-            echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><script>'
-               . 'window.location.replace(' . json_encode($redirectUrl) . ');'
-               . '</script></head><body></body></html>';
-            exit;
-        }
-
-        if (!headers_sent()) {
-            header('Content-Type: text/html; charset=UTF-8');
-        }
-        echo $html;
-        exit;
-    }
-
     private function renderAlert(string $type, string $html): string
     {
         $colors = [
@@ -832,10 +854,9 @@ JS;
             'danger'  => ['#f8d7da', '#721c24', '#f5c6cb'],
         ];
         [$bg, $fg, $border] = $colors[$type] ?? $colors['info'];
-        return '<div style="background:' . $bg . ';color:' . $fg . ';border:1px solid ' . $border . ';padding:10px 14px;border-radius:4px;margin:8px 0">' . $html . '</div>';
+        return '<div style="background:' . $bg . ';color:' . $fg . ';border:1px solid ' . $border
+             . ';padding:10px 14px;border-radius:4px;margin:8px 0">' . $html . '</div>';
     }
-
-    // ── Cache (5-Minuten TTL, logs/rmm_cache_{account}.json) ─────────────────
 
     private function getCachePath(string $accountNo): string
     {
