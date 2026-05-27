@@ -230,39 +230,174 @@ HTML;
             return $this->renderAlert('info', 'Keine Agents für diesen Client gefunden.');
         }
 
-        $html  = '<table class="table table-bordered listViewEntriesTable" style="width:100%;border-collapse:collapse;font-size:13px">';
+        $th = 'padding:6px 10px;text-align:left;border:1px solid #ddd;white-space:nowrap';
+        $td = 'padding:5px 10px;border:1px solid #ddd;vertical-align:top';
+        $tdc = $td . ';text-align:center';
+
+        $html  = $this->renderSummary($list);
+        $html .= '<table class="table table-bordered listViewEntriesTable" style="width:100%;border-collapse:collapse;font-size:13px">';
         $html .= '<thead><tr class="listViewHeaders" style="background:#f5f5f5">';
-        foreach (['Hostname', 'Status', 'OS', 'Letzter Kontakt', 'CPU %', 'RAM %'] as $col) {
-            $html .= '<th style="padding:6px 10px;text-align:left;border:1px solid #ddd">' . htmlspecialchars($col) . '</th>';
+        foreach (['Status', 'Hostname', 'LAN IP', 'OS', 'Seriennummer', 'TeamViewer ID', 'Letzter Kontakt', 'Disk Checks', 'CPU %', 'RAM %'] as $col) {
+            $html .= '<th style="' . $th . '">' . htmlspecialchars($col) . '</th>';
         }
         $html .= '</tr></thead><tbody>';
 
         foreach ($list as $agent) {
             if (!is_array($agent)) continue;
-            $hostname    = htmlspecialchars((string)($agent['hostname']         ?? ''));
-            $rawStatus   = (string)($agent['status']            ?? '');
-            $os          = htmlspecialchars((string)($agent['operating_system'] ?? $agent['plat'] ?? ''));
-            $lastContact = htmlspecialchars((string)($agent['last_seen']        ?? $agent['last_alert_time'] ?? ''));
-            $cpu         = isset($agent['cpu_load']) ? (int)$agent['cpu_load'] : null;
-            $ram         = isset($agent['used_ram']) ? (int)$agent['used_ram'] : null;
+
+            $rawStatus = (string)($agent['status'] ?? '');
+            $hostname  = htmlspecialchars((string)($agent['hostname'] ?? ''));
+            $lanIp     = htmlspecialchars($this->extractLanIp($agent));
+            $os        = htmlspecialchars($this->shortenOs((string)($agent['operating_system'] ?? $agent['plat'] ?? '')));
+            $serial    = htmlspecialchars($this->extractSerial($agent));
+            $tvId      = htmlspecialchars($this->extractTeamViewerId($agent));
+            $lastSeen  = htmlspecialchars($this->formatLastSeen((string)($agent['last_seen'] ?? $agent['last_alert_time'] ?? '')));
+            $diskHtml  = $this->renderDiskChecks($agent);
+            $cpu       = isset($agent['cpu_load']) ? (int)$agent['cpu_load'] : null;
+            $ram       = isset($agent['used_ram']) ? (int)$agent['used_ram'] : null;
 
             [$statusLabel, $statusStyle] = $this->statusLabel($rawStatus);
             $cpuHtml = $cpu !== null ? '<span style="' . $this->trafficLight($cpu) . '">' . $cpu . ' %</span>' : '<span style="color:#999">&#8211;</span>';
             $ramHtml = $ram !== null ? '<span style="' . $this->trafficLight($ram) . '">' . $ram . ' %</span>' : '<span style="color:#999">&#8211;</span>';
 
             $html .= '<tr class="listViewEntries" style="border-bottom:1px solid #eee">';
-            $html .= '<td style="padding:5px 10px;border:1px solid #ddd">' . $hostname . '</td>';
-            $html .= '<td style="padding:5px 10px;border:1px solid #ddd"><span style="' . $statusStyle . '">' . $statusLabel . '</span></td>';
-            $html .= '<td style="padding:5px 10px;border:1px solid #ddd">' . $os . '</td>';
-            $html .= '<td style="padding:5px 10px;border:1px solid #ddd">' . $lastContact . '</td>';
-            $html .= '<td style="padding:5px 10px;border:1px solid #ddd;text-align:center">' . $cpuHtml . '</td>';
-            $html .= '<td style="padding:5px 10px;border:1px solid #ddd;text-align:center">' . $ramHtml . '</td>';
+            $html .= '<td style="' . $td . '"><span style="' . $statusStyle . '">' . $statusLabel . '</span></td>';
+            $html .= '<td style="' . $td . '">' . $hostname . '</td>';
+            $html .= '<td style="' . $td . '">' . $lanIp . '</td>';
+            $html .= '<td style="' . $td . '">' . $os . '</td>';
+            $html .= '<td style="' . $td . '">' . $serial . '</td>';
+            $html .= '<td style="' . $td . '">' . $tvId . '</td>';
+            $html .= '<td style="' . $td . ';white-space:nowrap">' . $lastSeen . '</td>';
+            $html .= '<td style="' . $td . '">' . $diskHtml . '</td>';
+            $html .= '<td style="' . $tdc . '">' . $cpuHtml . '</td>';
+            $html .= '<td style="' . $tdc . '">' . $ramHtml . '</td>';
             $html .= '</tr>';
         }
 
         $html .= '</tbody></table>';
-        $html .= '<div style="font-size:11px;color:#999;margin-top:6px">' . count($list) . ' Agent(s) geladen</div>';
         return $html;
+    }
+
+    private function renderSummary(array $list): string
+    {
+        $total = count($list);
+        $online = $offline = $overdue = 0;
+        foreach ($list as $agent) {
+            if (!is_array($agent)) continue;
+            switch (strtolower((string)($agent['status'] ?? ''))) {
+                case 'online':  $online++;  break;
+                case 'offline': $offline++; break;
+                case 'overdue': $overdue++; break;
+            }
+        }
+        return '<div style="font-size:13px;font-weight:bold;margin-bottom:8px;color:#333">'
+            . $total . ' Agents'
+            . ' &nbsp;|&nbsp; <span style="color:#2e7d32">' . $online  . ' Online</span>'
+            . ' &nbsp;|&nbsp; <span style="color:#e65100">' . $overdue . ' Overdue</span>'
+            . ' &nbsp;|&nbsp; <span style="color:#c62828">' . $offline . ' Offline</span>'
+            . '</div>';
+    }
+
+    private function extractLanIp(array $agent): string
+    {
+        if (!empty($agent['local_ips']) && is_array($agent['local_ips'])) {
+            return (string)reset($agent['local_ips']);
+        }
+        if (!empty($agent['ip_addresses']) && is_array($agent['ip_addresses'])) {
+            return (string)reset($agent['ip_addresses']);
+        }
+        return (string)($agent['lanip'] ?? '');
+    }
+
+    private function shortenOs(string $os): string
+    {
+        return trim((string)preg_replace('/\s*\(build[^)]*\)/i', '', $os));
+    }
+
+    private function extractSerial(array $agent): string
+    {
+        if (!empty($agent['serial_number'])) {
+            return (string)$agent['serial_number'];
+        }
+        if (isset($agent['wmi_detail']['serial_number']) && $agent['wmi_detail']['serial_number'] !== '') {
+            return (string)$agent['wmi_detail']['serial_number'];
+        }
+        return '';
+    }
+
+    private function extractTeamViewerId(array $agent): string
+    {
+        $fields = isset($agent['custom_fields']) && is_array($agent['custom_fields'])
+                  ? $agent['custom_fields'] : [];
+        foreach ($fields as $cf) {
+            if (!is_array($cf)) continue;
+            // Name-based format: {"name": "TeamViewerClientID", "value": "..."}
+            $name = strtolower(trim((string)($cf['name'] ?? $cf['field_name'] ?? '')));
+            if ($name === 'teamviewerclientid') {
+                return (string)($cf['value'] ?? '');
+            }
+        }
+        return '';
+    }
+
+    private function formatLastSeen(string $raw): string
+    {
+        if ($raw === '') return '';
+        try {
+            $dt = new DateTime($raw);
+            $dt->setTimezone(new DateTimeZone('Europe/Berlin'));
+            return $dt->format('d.m.Y H:i');
+        } catch (Exception $e) {
+            return $raw;
+        }
+    }
+
+    private function renderDiskChecks(array $agent): string
+    {
+        $checks = isset($agent['checks']) && is_array($agent['checks']) ? $agent['checks'] : [];
+
+        // Normalise: {failing:[...], passing:[...]} or flat array
+        $allChecks = [];
+        if (isset($checks['failing']) || isset($checks['passing'])) {
+            $allChecks = array_merge((array)($checks['failing'] ?? []), (array)($checks['passing'] ?? []));
+        } else {
+            $allChecks = $checks;
+        }
+
+        $lines = [];
+        foreach ($allChecks as $check) {
+            if (!is_array($check)) continue;
+            $type = strtolower((string)($check['check_type'] ?? ''));
+            $name = (string)($check['name'] ?? '');
+            $isDisk = ($type === 'diskspace')
+                   || (stripos($name, 'disk') !== false)
+                   || (stripos($name, 'space') !== false);
+            if (!$isDisk) continue;
+
+            // Extract percentage
+            $pct = null;
+            if (isset($check['percent_used'])) {
+                $pct = (int)$check['percent_used'];
+            } elseif (isset($check['more_info']) && preg_match('/(\d+)\s*%/', (string)$check['more_info'], $m)) {
+                $pct = (int)$m[1];
+            } elseif (preg_match('/(\d+)\s*%/', $name, $m)) {
+                $pct = (int)$m[1];
+            }
+
+            $label = htmlspecialchars($name);
+            if ($pct !== null) {
+                $icon  = $pct >= 85 ? '&#9888;' : '&#10003;';
+                $color = $pct >= 85 ? 'color:#c62828' : 'color:#2e7d32';
+                $lines[] = '<span style="' . $color . '">' . $label . ' ' . $pct . '% ' . $icon . '</span>';
+            } else {
+                $lines[] = $label;
+            }
+        }
+
+        if (empty($lines)) {
+            return '<span style="color:#999">&#8211;</span>';
+        }
+        return implode('<br>', $lines);
     }
 
     private function statusLabel(string $status): array
