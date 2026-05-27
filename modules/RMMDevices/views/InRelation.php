@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/RMMDevicesHelper.php';
+
 class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
 
     private array  $debugLog = [];
@@ -11,7 +13,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         $accountId = (int) $request->get('record');
         $this->log("=== RMM Tab | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
 
-        [$rmm_url, $rmm_token, $configError] = $this->loadConfig();
+        [$rmm_url, $rmm_token, $rmm_frontend_url, $configError] = $this->loadConfig();
         $html = '<div class="relatedContainer" data-rmm="rmmdevices" style="padding:12px">';
 
         if ($configError) {
@@ -156,7 +158,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             ]);
         }
 
-        $html .= $this->renderTable($agentList, $tvFieldIds, $cacheAge, $refreshUrl);
+        $html .= $this->renderTable($agentList, $tvFieldIds, $cacheAge, $refreshUrl, $rmm_frontend_url);
         $html .= $this->renderDebugPanel();
         $html .= '</div>';
         $this->sendAndExit($html);
@@ -176,25 +178,9 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
 
     private function rmmGet(string $url, string $token): array
     {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 10,
-            CURLOPT_HTTPHEADER     => ['X-API-KEY: ' . $token, 'Content-Type: application/json'],
-            CURLOPT_SSL_VERIFYPEER => false,
-        ]);
-        $body    = curl_exec($ch);
-        $code    = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlErr = curl_error($ch);
-        curl_close($ch);
-
-        $this->log("  HTTP {$code}" . ($curlErr ? " cURL:{$curlErr}" : '') . " body[0..300]=" . substr((string)$body, 0, 300));
-
-        if ($body === false || $curlErr !== '') return [null, $curlErr ?: 'cURL-Fehler'];
-        if ($code < 200 || $code >= 300)        return [null, "HTTP {$code}: " . substr((string)$body, 0, 200)];
-        $data = json_decode($body, true);
-        if (!is_array($data))                   return [null, 'Ungültige JSON-Antwort: ' . substr((string)$body, 0, 200)];
-        return [$data, null];
+        [$data, $err] = RMMDevicesHelper::rmmGet($url, $token);
+        $this->log("  rmmGet " . $url . " → " . ($err !== null ? "ERR:{$err}" : 'OK (' . (is_array($data) ? count($data) . ' keys' : gettype($data)) . ')'));
+        return [$data, $err];
     }
 
     private function log(string $line): void
@@ -227,15 +213,7 @@ HTML;
 
     private function loadConfig(): array
     {
-        $path = __DIR__ . '/../../../config_rmm.php';
-        if (!file_exists($path)) {
-            return [null, null, 'config_rmm.php nicht gefunden (Pfad: ' . $path . ')'];
-        }
-        $cfg = require $path;
-        if (empty($cfg['rmm_url']) || empty($cfg['rmm_token'])) {
-            return [null, null, 'config_rmm.php unvollständig: rmm_url und rmm_token werden benötigt.'];
-        }
-        return [$cfg['rmm_url'], $cfg['rmm_token'], null];
+        return RMMDevicesHelper::loadConfig();
     }
 
     private function getAccountNo(int $accountId): ?string
@@ -247,20 +225,21 @@ HTML;
         return trim($row['account_no']);
     }
 
-    private function renderTable(array $list, array $tvFieldIds = [], int $cacheAge = -1, string $refreshUrl = ''): string
+    private function renderTable(array $list, array $tvFieldIds = [], int $cacheAge = -1, string $refreshUrl = '', string $rmmFrontendUrl = ''): string
     {
         if (empty($list)) {
             return $this->renderAlert('info', 'Keine Agents für diesen Client gefunden.');
         }
 
-        $th = 'padding:6px 10px;text-align:left;border:1px solid #ddd;white-space:nowrap';
-        $td = 'padding:5px 10px;border:1px solid #ddd;vertical-align:top';
+        $th  = 'padding:6px 10px;text-align:left;border:1px solid #ddd;white-space:nowrap';
+        $td  = 'padding:5px 10px;border:1px solid #ddd;vertical-align:top';
         $tdc = $td . ';text-align:center';
 
         $html  = $this->renderSummary($list, $cacheAge, $refreshUrl);
+        $html .= $this->renderTakeControlScript();
         $html .= '<table class="table table-bordered listViewEntriesTable" style="width:100%;border-collapse:collapse;font-size:13px">';
         $html .= '<thead><tr class="listViewHeaders" style="background:#f5f5f5">';
-        foreach (['Status', 'Hostname', 'LAN IP', 'OS', 'Seriennummer', 'TeamViewer ID', 'Letzter Kontakt', 'Disk Checks', 'CPU %', 'RAM %'] as $col) {
+        foreach (['Status', 'Hostname', 'LAN IP', 'OS', 'Seriennummer', 'TeamViewer ID', 'Letzter Kontakt', 'Disk Checks', 'CPU %', 'RAM %', 'Aktionen'] as $col) {
             $html .= '<th style="' . $th . '">' . htmlspecialchars($col) . '</th>';
         }
         $html .= '</tr></thead><tbody>';
@@ -273,15 +252,16 @@ HTML;
             $lanIp     = htmlspecialchars($this->extractLanIp($agent));
             $os        = htmlspecialchars($this->shortenOs((string)($agent['operating_system'] ?? $agent['plat'] ?? '')));
             $serial    = htmlspecialchars($this->extractSerial($agent));
-            $tvId      = htmlspecialchars($this->extractTeamViewerId($agent, $tvFieldIds));
+            $tvId      = $this->extractTeamViewerId($agent, $tvFieldIds);
             $lastSeen  = htmlspecialchars($this->formatLastSeen((string)($agent['last_seen'] ?? $agent['last_alert_time'] ?? '')));
             $diskHtml  = $this->renderDiskChecks($agent);
             $cpu       = isset($agent['cpu_load']) ? (int)$agent['cpu_load'] : null;
             $ram       = isset($agent['used_ram']) ? (int)$agent['used_ram'] : null;
 
             [$statusLabel, $statusStyle] = $this->statusLabel($rawStatus);
-            $cpuHtml = $cpu !== null ? '<span style="' . $this->trafficLight($cpu) . '">' . $cpu . ' %</span>' : '<span style="color:#999">&#8211;</span>';
-            $ramHtml = $ram !== null ? '<span style="' . $this->trafficLight($ram) . '">' . $ram . ' %</span>' : '<span style="color:#999">&#8211;</span>';
+            $cpuHtml     = $cpu !== null ? '<span style="' . $this->trafficLight($cpu) . '">' . $cpu . ' %</span>' : '<span style="color:#999">&#8211;</span>';
+            $ramHtml     = $ram !== null ? '<span style="' . $this->trafficLight($ram) . '">' . $ram . ' %</span>' : '<span style="color:#999">&#8211;</span>';
+            $actionsHtml = $this->renderActionButtons($agent, $rmmFrontendUrl, $tvId);
 
             $html .= '<tr class="listViewEntries" style="border-bottom:1px solid #eee">';
             $html .= '<td style="' . $td . '"><span style="' . $statusStyle . '">' . $statusLabel . '</span></td>';
@@ -289,16 +269,81 @@ HTML;
             $html .= '<td style="' . $td . '">' . $lanIp . '</td>';
             $html .= '<td style="' . $td . '">' . $os . '</td>';
             $html .= '<td style="' . $td . '">' . $serial . '</td>';
-            $html .= '<td style="' . $td . '">' . $tvId . '</td>';
+            $html .= '<td style="' . $td . '">' . htmlspecialchars($tvId) . '</td>';
             $html .= '<td style="' . $td . ';white-space:nowrap">' . $lastSeen . '</td>';
             $html .= '<td style="' . $td . '">' . $diskHtml . '</td>';
             $html .= '<td style="' . $tdc . '">' . $cpuHtml . '</td>';
             $html .= '<td style="' . $tdc . '">' . $ramHtml . '</td>';
+            $html .= '<td style="' . $td . ';white-space:nowrap">' . $actionsHtml . '</td>';
             $html .= '</tr>';
         }
 
         $html .= '</tbody></table>';
         return $html;
+    }
+
+    private function renderActionButtons(array $agent, string $rmmFrontendUrl, string $tvId): string
+    {
+        $s  = 'padding:2px 7px;font-size:11px;border-radius:3px;cursor:pointer;border:1px solid;margin-right:3px;white-space:nowrap';
+        $bB = $s . ';background:#1976d2;color:#fff;border-color:#1565c0';
+        $bG = $s . ';background:#388e3c;color:#fff;border-color:#2e7d32';
+        $bO = $s . ';background:#f57c00;color:#fff;border-color:#e65100';
+
+        $html = '';
+
+        // TRMM button — link to web UI filtered by hostname
+        if ($rmmFrontendUrl !== '') {
+            $hostname = (string)($agent['hostname'] ?? '');
+            $trmmUrl  = addslashes(rtrim($rmmFrontendUrl, '/') . '/?search=' . urlencode($hostname));
+            $html .= '<button style="' . $bB . '" onclick="window.open(\'' . $trmmUrl . '\',\'_blank\')">TRMM</button>';
+        }
+
+        // TeamViewer button
+        if ($tvId !== '') {
+            $tvUrl = addslashes('https://start.teamviewer.com/' . urlencode($tvId));
+            $html .= '<button style="' . $bG . '" onclick="window.open(\'' . $tvUrl . '\',\'_blank\')">TeamViewer</button>';
+        }
+
+        // Take Control button — only for non-offline agents
+        if (strtolower((string)($agent['status'] ?? '')) !== 'offline') {
+            $agentId = addslashes((string)($agent['agent_id'] ?? $agent['id'] ?? ''));
+            $html .= '<button style="' . $bO . '" onclick="rmmTakeControl(this,\'' . $agentId . '\')">Take Control</button>';
+        }
+
+        return $html;
+    }
+
+    private function renderTakeControlScript(): string
+    {
+        return <<<'JS'
+<script type="text/javascript">
+if (typeof rmmTakeControl === 'undefined') {
+    function rmmTakeControl(btn, agentId) {
+        var origText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '...';
+        var url = location.pathname + '?module=RMMDevices&view=MeshProxy&agent_id='
+                  + encodeURIComponent(agentId);
+        fetch(url, {headers: {'X-Requested-With': 'XMLHttpRequest'}})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.url) {
+                window.open(data.url, '_blank');
+            } else {
+                alert('Take Control nicht verfügbar: ' + (data.error || 'Unbekannter Fehler'));
+            }
+            btn.disabled = false;
+            btn.textContent = origText;
+        })
+        .catch(function(e) {
+            alert('Verbindungsfehler: ' + e);
+            btn.disabled = false;
+            btn.textContent = origText;
+        });
+    }
+}
+</script>
+JS;
     }
 
     private function renderSummary(array $list, int $cacheAge = -1, string $refreshUrl = ''): string
