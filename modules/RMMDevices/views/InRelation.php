@@ -34,19 +34,25 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         [$cfDefs, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/core/customfields/', $rmm_token);
         $siteFieldIds   = [];
         $clientFieldIds = [];
+        $tvFieldIds     = [];
         if ($err === null && is_array($cfDefs)) {
             $cfList = $cfDefs['results'] ?? $cfDefs;
             foreach ($cfList as $cf) {
                 if (!is_array($cf)) continue;
-                if (strtolower(trim((string)($cf['name'] ?? ''))) !== 'berlicrm_id') continue;
+                $cfName  = strtolower(trim((string)($cf['name'] ?? '')));
                 $cfId    = isset($cf['id']) ? (int)$cf['id'] : null;
                 $cfModel = strtolower(trim((string)($cf['model'] ?? '')));
                 if ($cfId === null) continue;
-                if ($cfModel === 'site')   $siteFieldIds[]   = $cfId;
-                if ($cfModel === 'client') $clientFieldIds[] = $cfId;
+                if ($cfName === 'berlicrm_id') {
+                    if ($cfModel === 'site')   $siteFieldIds[]   = $cfId;
+                    if ($cfModel === 'client') $clientFieldIds[] = $cfId;
+                }
+                if ($cfName === 'teamviewerclientid') {
+                    $tvFieldIds[] = $cfId;
+                }
             }
         }
-        $this->log("fieldIds: client=[" . implode(',', $clientFieldIds) . "] site=[" . implode(',', $siteFieldIds) . "]");
+        $this->log("fieldIds: client=[" . implode(',', $clientFieldIds) . "] site=[" . implode(',', $siteFieldIds) . "] tv=[" . implode(',', $tvFieldIds) . "]");
 
         // ── Step 2: Verknüpften Client/Site finden ───────────────────────────
         $trmClientId = null;
@@ -133,7 +139,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         $agentList = $agentsData['results'] ?? $agentsData;
         $this->log("Agents geladen: " . count((array)$agentList));
 
-        $html .= $this->renderTable((array)$agentList);
+        $html .= $this->renderTable((array)$agentList, $tvFieldIds);
         $html .= $this->renderDebugPanel();
         $html .= '</div>';
         $this->sendAndExit($html);
@@ -224,7 +230,7 @@ HTML;
         return trim($row['account_no']);
     }
 
-    private function renderTable(array $list): string
+    private function renderTable(array $list, array $tvFieldIds = []): string
     {
         if (empty($list)) {
             return $this->renderAlert('info', 'Keine Agents für diesen Client gefunden.');
@@ -250,7 +256,7 @@ HTML;
             $lanIp     = htmlspecialchars($this->extractLanIp($agent));
             $os        = htmlspecialchars($this->shortenOs((string)($agent['operating_system'] ?? $agent['plat'] ?? '')));
             $serial    = htmlspecialchars($this->extractSerial($agent));
-            $tvId      = htmlspecialchars($this->extractTeamViewerId($agent));
+            $tvId      = htmlspecialchars($this->extractTeamViewerId($agent, $tvFieldIds));
             $lastSeen  = htmlspecialchars($this->formatLastSeen((string)($agent['last_seen'] ?? $agent['last_alert_time'] ?? '')));
             $diskHtml  = $this->renderDiskChecks($agent);
             $cpu       = isset($agent['cpu_load']) ? (int)$agent['cpu_load'] : null;
@@ -325,7 +331,7 @@ HTML;
         return '';
     }
 
-    private function extractTeamViewerId(array $agent): string
+    private function extractTeamViewerId(array $agent, array $tvFieldIds = []): string
     {
         $fields = isset($agent['custom_fields']) && is_array($agent['custom_fields'])
                   ? $agent['custom_fields'] : [];
@@ -335,6 +341,12 @@ HTML;
             $name = strtolower(trim((string)($cf['name'] ?? $cf['field_name'] ?? '')));
             if ($name === 'teamviewerclientid') {
                 return (string)($cf['value'] ?? '');
+            }
+            // ID-based format: {"field": 5, "value": "..."} — match against known field IDs
+            if (!empty($tvFieldIds) && isset($cf['field']) && is_numeric($cf['field'])) {
+                if (in_array((int)$cf['field'], $tvFieldIds, true)) {
+                    return (string)($cf['value'] ?? '');
+                }
             }
         }
         return '';
@@ -354,27 +366,47 @@ HTML;
 
     private function renderDiskChecks(array $agent): string
     {
-        $checks = isset($agent['checks']) && is_array($agent['checks']) ? $agent['checks'] : [];
+        $lines = [];
 
-        // Normalise: {failing:[...], passing:[...]} or flat array
+        // Primary: agent['disks'] — TacticalRMM includes this in agent listing
+        // Format: [{"device": "C:", "percent": 45, "free": "50 GB", ...}, ...]
+        if (!empty($agent['disks']) && is_array($agent['disks'])) {
+            foreach ($agent['disks'] as $disk) {
+                if (!is_array($disk)) continue;
+                $device = (string)($disk['device'] ?? $disk['name'] ?? '?');
+                $pct    = isset($disk['percent']) ? (int)$disk['percent'] : null;
+                if ($pct !== null) {
+                    $icon    = $pct >= 85 ? '&#9888;' : '&#10003;';
+                    $color   = $pct >= 85 ? 'color:#c62828' : 'color:#2e7d32';
+                    $lines[] = '<span style="' . $color . '">' . htmlspecialchars($device) . ' ' . $pct . '% ' . $icon . '</span>';
+                } else {
+                    $lines[] = htmlspecialchars($device);
+                }
+            }
+            if (!empty($lines)) {
+                return implode('<br>', $lines);
+            }
+        }
+
+        // Fallback: agent['checks'] — may contain diskspace check objects
+        $checks = isset($agent['checks']) && is_array($agent['checks']) ? $agent['checks'] : [];
         $allChecks = [];
         if (isset($checks['failing']) || isset($checks['passing'])) {
             $allChecks = array_merge((array)($checks['failing'] ?? []), (array)($checks['passing'] ?? []));
-        } else {
+        } elseif (!isset($checks['total'])) {
+            // flat array of check objects (skip count-only blocks like {total:3, passing:2, ...})
             $allChecks = $checks;
         }
 
-        $lines = [];
         foreach ($allChecks as $check) {
             if (!is_array($check)) continue;
-            $type = strtolower((string)($check['check_type'] ?? ''));
-            $name = (string)($check['name'] ?? '');
+            $type   = strtolower((string)($check['check_type'] ?? ''));
+            $name   = (string)($check['name'] ?? '');
             $isDisk = ($type === 'diskspace')
                    || (stripos($name, 'disk') !== false)
                    || (stripos($name, 'space') !== false);
             if (!$isDisk) continue;
 
-            // Extract percentage
             $pct = null;
             if (isset($check['percent_used'])) {
                 $pct = (int)$check['percent_used'];
@@ -386,8 +418,8 @@ HTML;
 
             $label = htmlspecialchars($name);
             if ($pct !== null) {
-                $icon  = $pct >= 85 ? '&#9888;' : '&#10003;';
-                $color = $pct >= 85 ? 'color:#c62828' : 'color:#2e7d32';
+                $icon    = $pct >= 85 ? '&#9888;' : '&#10003;';
+                $color   = $pct >= 85 ? 'color:#c62828' : 'color:#2e7d32';
                 $lines[] = '<span style="' . $color . '">' . $label . ' ' . $pct . '% ' . $icon . '</span>';
             } else {
                 $lines[] = $label;
