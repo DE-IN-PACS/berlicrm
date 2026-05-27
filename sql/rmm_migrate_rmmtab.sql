@@ -1,33 +1,31 @@
 -- =============================================================================
--- TacticalRMM – Migration: Related Tab auf Accounts-Self-Relation umstellen
+-- ACHTUNG: Diese Datei war fehlerhaft und wurde korrigiert.
 --
--- Hintergrund:
---   vtiger rendert mode=showRelatedList nur mit vollem Account-Rahmen wenn
---   related_tabid eine von vtiger intern bekannte Modul-ID ist.
---   RMMDevices ist ein Stub-Modul und wird nicht erkannt.
---   Fix: related_tabid = Accounts-tabid (Self-Relation), Dispatch via
---        module=Accounts&view=RMMTab (neuer Endpoint in Accounts/views/).
+-- Die ursprüngliche Version setzte name='getRMMDevicesTab' was vtiger beim
+-- Laden des Account-Detail-Views zum Crash brachte, weil
+-- $accountsObj->getRMMDevicesTab() nicht existiert.
 --
--- Voraussetzung:
---   rmm_setup.sql wurde bereits ausgeführt (vtiger_tab-Eintrag vorhanden).
---
--- Ausführen in phpMyAdmin oder via MySQL-CLI gegen die berliCRM-Datenbank.
+-- REVERT (falls die alte Version ausgeführt wurde):
 -- =============================================================================
 
 UPDATE `vtiger_relatedlists`
 SET
-    `tabid`         = (SELECT `tabid` FROM `vtiger_tab` WHERE `name` = 'Accounts' LIMIT 1),
-    `related_tabid` = (SELECT `tabid` FROM `vtiger_tab` WHERE `name` = 'Accounts' LIMIT 1),
-    `name`          = 'getRMMDevicesTab',
-    `actions`       = 'RMMTab',
-    `presence`      = 0
+    `related_tabid` = (SELECT `tabid` FROM `vtiger_tab`
+                       WHERE `name` = 'RMMDevices' LIMIT 1),
+    `name`          = 'get_rmmdevices',
+    `actions`       = ''
 WHERE `label` = 'RMM Geräte';
 
--- Prüfen ob das Update wirksam war (sollte 1 Zeile zeigen):
--- SELECT * FROM vtiger_relatedlists WHERE label = 'RMM Geräte';
-
--- =============================================================================
--- NACH dem SQL zwingend erforderlich:
---   Admin → Einstellungen → Reparieren → „Quick Repair and Rebuild"
---   → „Rebuild Relationships"
+-- Prüfen ob das Revert funktioniert hat:
+-- SELECT relation_id, tabid, related_tabid, name, actions, presence
+-- FROM vtiger_relatedlists WHERE label = 'RMM Geräte';
+--
+-- Erwartetes Ergebnis:
+--   tabid         = Accounts-tabid (6 oder ähnlich)
+--   related_tabid = RMMDevices-tabid
+--   name          = get_rmmdevices
+--   actions       = (leer)
+--   presence      = 0
+--
+-- Danach: Admin → Einstellungen → Reparieren → "Quick Repair and Rebuild"
 -- =============================================================================
