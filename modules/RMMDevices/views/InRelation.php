@@ -14,19 +14,6 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
 
         $accountId = (int) $request->get('record');
 
-        $mode   = (string)(isset($_GET['mode']) ? $_GET['mode'] : '');
-        $view   = (string)(isset($_GET['view'])  ? $_GET['view']  : '');
-        $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
-               || !empty($_SERVER['HTTP_X_PJAX']);
-        $isTab  = ($mode === 'showRelatedList')
-               || ($view === 'RMMTab')
-               || $isAjax;
-
-        if (!$isTab && $accountId > 0) {
-            header('Location: index.php?module=Accounts&view=Detail&record=' . $accountId);
-            exit;
-        }
-
         $this->log("=== RMM Tab | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
 
         [$rmm_url, $rmm_token, $rmm_frontend_url, $configError] = $this->loadConfig();
@@ -788,6 +775,17 @@ JS;
         // Fallback: remove blockUI overlay elements directly
         $dvi.find('.blockUI').remove();
         $dvi.css({'opacity': '', 'pointer-events': ''});
+
+        // If page was loaded via #rmm-tab redirect: clean hash, then re-click the tab
+        // so vtiger registers it as the active tab in its own state
+        if (window.location.hash === '#rmm-tab') {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+            setTimeout(function(){
+                $('a').filter(function(){
+                    return $(this).text().replace(/\s*\(\d+\)/, '').trim() === 'RMM Geräte';
+                }).first().trigger('click');
+            }, 800);
+        }
     }, 600);
 })(jQuery);
 </script>
@@ -799,6 +797,26 @@ JS;
         while (ob_get_level() > 0) {
             ob_end_clean();
         }
+
+        $mode   = isset($_GET['mode']) ? (string)$_GET['mode'] : '';
+        $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+               || !empty($_SERVER['HTTP_X_PJAX']);
+        $isTab  = ($mode === 'showRelatedList') || $isAjax;
+
+        $accountId = (int)(isset($_REQUEST['record']) ? $_REQUEST['record'] : 0);
+
+        if (!$isTab && $accountId > 0) {
+            // Direct browser hit — redirect to full Account view and activate the RMM tab via hash
+            $redirectUrl = 'index.php?module=Accounts&view=Detail&record=' . $accountId . '#rmm-tab';
+            if (!headers_sent()) {
+                header('Content-Type: text/html; charset=UTF-8');
+            }
+            echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><script>'
+               . 'window.location.replace(' . json_encode($redirectUrl) . ');'
+               . '</script></head><body></body></html>';
+            exit;
+        }
+
         if (!headers_sent()) {
             header('Content-Type: text/html; charset=UTF-8');
         }
