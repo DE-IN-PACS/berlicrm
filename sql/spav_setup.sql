@@ -47,7 +47,7 @@ SELECT
     (SELECT MAX(`tabid`) + 1 FROM `vtiger_tab`)  AS tabid,
     'SPAVDevices',
     0,
-    (SELECT MAX(`tabsequence`) + 1 FROM `vtiger_tab`),
+    -1,
     'AV Clients',
     1,
     0,
