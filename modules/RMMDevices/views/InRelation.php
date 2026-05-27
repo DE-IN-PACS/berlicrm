@@ -3,6 +3,8 @@ require_once __DIR__ . '/RMMDevicesHelper.php';
 
 class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
 
+    private const CACHE_VERSION = 4;
+
     private array  $debugLog = [];
     private string $logFile  = '';
 
@@ -232,6 +234,7 @@ HTML;
         }
 
         $th  = 'padding:6px 10px;text-align:left;border:1px solid #ddd;white-space:nowrap';
+        $thS = $th . ';cursor:pointer;user-select:none';
         $td  = 'padding:5px 10px;border:1px solid #ddd;vertical-align:top';
         $tdc = $td . ';text-align:center';
 
@@ -239,8 +242,29 @@ HTML;
         $html .= $this->renderTakeControlScript();
         $html .= '<table class="table table-bordered listViewEntriesTable" style="width:100%;border-collapse:collapse;font-size:13px">';
         $html .= '<thead><tr class="listViewHeaders" style="background:#f5f5f5">';
-        foreach (['Status', 'Hostname', 'LAN IP', 'OS', 'Seriennummer', 'TeamViewer ID', 'Letzter Kontakt', 'Disk Checks', 'CPU %', 'RAM %', 'Aktionen'] as $col) {
-            $html .= '<th style="' . $th . '">' . htmlspecialchars($col) . '</th>';
+
+        // [label, sort-key or null]
+        $headers = [
+            ['Status',          null],
+            ['Hostname',        'hostname'],
+            ['LAN IP',          'lanip'],
+            ['OS',              null],
+            ['Seriennummer',    null],
+            ['TeamViewer ID',   null],
+            ['Letzter Kontakt', null],
+            ['RAM',             null],
+            ['Disk Checks',     'disks'],
+            ['Patches',         'patches'],
+            ['Aktionen',        null],
+        ];
+        foreach ($headers as $hdr) {
+            list($label, $colKey) = $hdr;
+            if ($colKey !== null) {
+                $html .= '<th style="' . $thS . '" data-col="' . $colKey . '">'
+                    . htmlspecialchars($label) . ' <span class="sort-arrow">&#8597;</span></th>';
+            } else {
+                $html .= '<th style="' . $th . '">' . htmlspecialchars($label) . '</th>';
+            }
         }
         $html .= '</tr></thead><tbody>';
 
@@ -248,38 +272,110 @@ HTML;
             if (!is_array($agent)) continue;
 
             $rawStatus = (string)($agent['status'] ?? '');
-            $hostname  = htmlspecialchars((string)($agent['hostname'] ?? ''));
-            $lanIp     = htmlspecialchars($this->extractLanIp($agent));
+            $hostname  = (string)($agent['hostname'] ?? '');
+            $lanIp     = $this->extractLanIp($agent);
             $os        = htmlspecialchars($this->shortenOs((string)($agent['operating_system'] ?? $agent['plat'] ?? '')));
             $serial    = htmlspecialchars($this->extractSerial($agent));
             $tvId      = $this->extractTeamViewerId($agent, $tvFieldIds);
             $lastSeen  = htmlspecialchars($this->formatLastSeen((string)($agent['last_seen'] ?? $agent['last_alert_time'] ?? '')));
-            $diskHtml  = $this->renderDiskChecks($agent);
-            $cpu       = isset($agent['cpu_load']) ? (int)$agent['cpu_load'] : null;
-            $ram       = isset($agent['used_ram']) ? (int)$agent['used_ram'] : null;
+
+            // RAM capacity (GB, no percentage)
+            $totalRam = isset($agent['total_ram']) ? (int)$agent['total_ram'] : null;
+            $ramHtml  = $totalRam !== null
+                ? htmlspecialchars($totalRam . ' GB')
+                : '<span style="color:#999">&#8211;</span>';
+
+            // Disk checks → [html, maxUsedPct]
+            [$diskHtml, $diskMaxPct] = $this->renderDiskChecks($agent);
+
+            // Patches pending
+            $hasPatch = isset($agent['has_patches_pending']) ? (bool)$agent['has_patches_pending'] : null;
+            if ($hasPatch === true) {
+                $patchHtml    = '<span style="color:#e65100;font-weight:bold">&#9888; Ja</span>';
+                $patchSortVal = '1';
+            } else {
+                $patchHtml    = '<span style="color:#999">&#8211;</span>';
+                $patchSortVal = '0';
+            }
 
             [$statusLabel, $statusStyle] = $this->statusLabel($rawStatus);
-            $cpuHtml     = $cpu !== null ? '<span style="' . $this->trafficLight($cpu) . '">' . $cpu . ' %</span>' : '<span style="color:#999">&#8211;</span>';
-            $ramHtml     = $ram !== null ? '<span style="' . $this->trafficLight($ram) . '">' . $ram . ' %</span>' : '<span style="color:#999">&#8211;</span>';
             $actionsHtml = $this->renderActionButtons($agent, $rmmFrontendUrl, $tvId);
+
+            // Sort values
+            $hostSortVal = htmlspecialchars(strtolower($hostname));
+            $ipSortVal   = htmlspecialchars($this->ipSortVal($lanIp));
+            $diskSortVal = str_pad((string)$diskMaxPct, 3, '0', STR_PAD_LEFT);
 
             $html .= '<tr class="listViewEntries" style="border-bottom:1px solid #eee">';
             $html .= '<td style="' . $td . '"><span style="' . $statusStyle . '">' . $statusLabel . '</span></td>';
-            $html .= '<td style="' . $td . '">' . $hostname . '</td>';
-            $html .= '<td style="' . $td . '">' . $lanIp . '</td>';
+            $html .= '<td style="' . $td . '" data-col="hostname" data-val="' . $hostSortVal . '">' . htmlspecialchars($hostname) . '</td>';
+            $html .= '<td style="' . $td . '" data-col="lanip"    data-val="' . $ipSortVal   . '">' . htmlspecialchars($lanIp)   . '</td>';
             $html .= '<td style="' . $td . '">' . $os . '</td>';
             $html .= '<td style="' . $td . '">' . $serial . '</td>';
             $html .= '<td style="' . $td . '">' . htmlspecialchars($tvId) . '</td>';
             $html .= '<td style="' . $td . ';white-space:nowrap">' . $lastSeen . '</td>';
-            $html .= '<td style="' . $td . '">' . $diskHtml . '</td>';
-            $html .= '<td style="' . $tdc . '">' . $cpuHtml . '</td>';
             $html .= '<td style="' . $tdc . '">' . $ramHtml . '</td>';
+            $html .= '<td style="' . $td . '" data-col="disks"   data-val="' . $diskSortVal   . '">' . $diskHtml   . '</td>';
+            $html .= '<td style="' . $tdc . '" data-col="patches" data-val="' . $patchSortVal . '">' . $patchHtml  . '</td>';
             $html .= '<td style="' . $td . ';white-space:nowrap">' . $actionsHtml . '</td>';
             $html .= '</tr>';
         }
 
         $html .= '</tbody></table>';
+        $html .= $this->renderSortScript();
         return $html;
+    }
+
+    private function ipSortVal(string $ip): string
+    {
+        $parts = explode('.', $ip);
+        if (count($parts) !== 4) return $ip;
+        $padded = [];
+        foreach ($parts as $p) {
+            $padded[] = str_pad((string)(int)$p, 3, '0', STR_PAD_LEFT);
+        }
+        return implode('.', $padded);
+    }
+
+    private function renderSortScript(): string
+    {
+        return <<<'JS'
+<script type="text/javascript">
+(function(){
+    var currentCol = null;
+    var currentDir = 'asc';
+    document.querySelectorAll('th[data-col]').forEach(function(th){
+        th.addEventListener('click', function(){
+            var col = th.getAttribute('data-col');
+            if (currentCol === col) {
+                currentDir = currentDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentCol = col;
+                currentDir = 'asc';
+            }
+            document.querySelectorAll('th[data-col]').forEach(function(t){
+                t.querySelector('.sort-arrow').textContent = ' ↕';
+            });
+            th.querySelector('.sort-arrow').textContent =
+                currentDir === 'asc' ? ' ↑' : ' ↓';
+            var tbody = th.closest('table').querySelector('tbody');
+            var rows  = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+            rows.sort(function(a, b){
+                var aVal = '';
+                var bVal = '';
+                var aTd = a.querySelector('td[data-col="' + col + '"]');
+                var bTd = b.querySelector('td[data-col="' + col + '"]');
+                if (aTd) aVal = aTd.getAttribute('data-val') || '';
+                if (bTd) bVal = bTd.getAttribute('data-val') || '';
+                var cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+                return currentDir === 'asc' ? cmp : -cmp;
+            });
+            rows.forEach(function(r){ tbody.appendChild(r); });
+        });
+    });
+})();
+</script>
+JS;
     }
 
     private function renderActionButtons(array $agent, string $rmmFrontendUrl, string $tvId): string
@@ -502,67 +598,73 @@ JS;
         }
     }
 
-    private function renderDiskChecks(array $agent): string
+    private function renderDiskChecks(array $agent): array
     {
-        $lines = [];
+        $sortable = []; // key = drive letter, value = html
+        $maxPct   = 0;
 
-        // Primary: agent['disks'] — TacticalRMM includes this in agent listing
-        // Format: [{"device": "C:", "percent": 45, "free": "50 GB", ...}, ...]
-        if (!empty($agent['disks']) && is_array($agent['disks'])) {
-            foreach ($agent['disks'] as $disk) {
-                if (!is_array($disk)) continue;
-                $device = (string)($disk['device'] ?? $disk['name'] ?? '?');
-                $pct    = isset($disk['percent']) ? (int)$disk['percent'] : null;
-                if ($pct !== null) {
-                    $icon    = $pct >= 85 ? '&#9888;' : '&#10003;';
-                    $color   = $pct >= 85 ? 'color:#c62828' : 'color:#2e7d32';
-                    $lines[] = '<span style="' . $color . '">' . htmlspecialchars($device) . ' ' . $pct . '% ' . $icon . '</span>';
-                } else {
-                    $lines[] = htmlspecialchars($device);
-                }
-            }
-            if (!empty($lines)) {
-                return implode('<br>', $lines);
-            }
-        }
-
-        // Fallback: checks_detail — flat array from /agents/{id}/checks/
-        // Format: [{"check_type":"diskspace","name":"C:\\","more_info":"75.50GB free / 237.43GB total (31%)","status":"passing"}, ...]
+        // Primary: checks_detail from /agents/{id}/checks/
         $allChecks = isset($agent['checks_detail']) && is_array($agent['checks_detail'])
                      ? $agent['checks_detail'] : [];
 
         foreach ($allChecks as $check) {
             if (!is_array($check)) continue;
-            $type   = strtolower((string)($check['check_type'] ?? ''));
-            $name   = (string)($check['name'] ?? '');
-            $isDisk = ($type === 'diskspace')
-                   || (stripos($name, 'disk') !== false)
-                   || (stripos($name, 'space') !== false);
+
+            // Identify disk checks via readable_desc or presence of 'disk' field
+            $rdesc  = (string)($check['readable_desc'] ?? '');
+            $isDisk = stripos($rdesc, 'disk') !== false
+                   || (isset($check['disk']) && (string)$check['disk'] !== '');
             if (!$isDisk) continue;
 
-            $pct = null;
-            if (isset($check['percent_used'])) {
-                $pct = (int)$check['percent_used'];
-            } elseif (isset($check['more_info']) && preg_match('/\((\d+)%\)/', (string)$check['more_info'], $m)) {
-                $pct = (int)$m[1];
-            } elseif (preg_match('/(\d+)\s*%/', $name, $m)) {
-                $pct = (int)$m[1];
+            // Drive letter from readable_desc: "Disk Space Check: Drive C: - ..."
+            $drive = 'Disk';
+            if (preg_match('/Drive\s+([^:\s]+:)/i', $rdesc, $dm)) {
+                $drive = trim($dm[1]);
             }
 
-            $label = htmlspecialchars($name);
-            if ($pct !== null) {
-                $icon    = $pct >= 85 ? '&#9888;' : '&#10003;';
-                $color   = $pct >= 85 ? 'color:#c62828' : 'color:#2e7d32';
-                $lines[] = '<span style="' . $color . '">' . $label . ' ' . $pct . '% ' . $icon . '</span>';
-            } else {
-                $lines[] = $label;
+            // more_info + status live inside check_result
+            $moreInfo = (string)($check['check_result']['more_info'] ?? '');
+            $status   = strtolower((string)($check['check_result']['status'] ?? 'passing'));
+
+            // Calculate used% from "Total: 237.3 GB, Free: 140.1 GB"
+            $pct = 0;
+            if (preg_match('/Total:\s*([\d.]+)\s*GB,\s*Free:\s*([\d.]+)\s*GB/i', $moreInfo, $m)) {
+                $total = (float)$m[1];
+                $free  = (float)$m[2];
+                $pct   = $total > 0 ? (int)round(($total - $free) / $total * 100) : 0;
+            }
+            if ($pct > $maxPct) $maxPct = $pct;
+
+            $isPassing   = ($status === 'passing');
+            $icon        = $isPassing ? '&#10003;' : '&#9888;';
+            $color       = $isPassing ? 'color:#2e7d32' : 'color:#c62828';
+            $sortable[$drive] = '<span style="' . $color . '">'
+                . htmlspecialchars($drive) . ' ' . $pct . '% ' . $icon . '</span>';
+        }
+
+        // Fallback: agent['disks'] from agent listing (percent field)
+        if (empty($sortable) && !empty($agent['disks']) && is_array($agent['disks'])) {
+            foreach ($agent['disks'] as $disk) {
+                if (!is_array($disk)) continue;
+                $device = (string)($disk['device'] ?? $disk['name'] ?? '?');
+                $pct    = isset($disk['percent']) ? (int)$disk['percent'] : null;
+                if ($pct !== null) {
+                    if ($pct > $maxPct) $maxPct = $pct;
+                    $icon    = $pct >= 85 ? '&#9888;' : '&#10003;';
+                    $color   = $pct >= 85 ? 'color:#c62828' : 'color:#2e7d32';
+                    $sortable[$device] = '<span style="' . $color . '">'
+                        . htmlspecialchars($device) . ' ' . $pct . '% ' . $icon . '</span>';
+                } else {
+                    $sortable[$device] = htmlspecialchars($device);
+                }
             }
         }
 
-        if (empty($lines)) {
-            return '<span style="color:#999">&#8211;</span>';
+        if (empty($sortable)) {
+            return ['<span style="color:#999">&#8211;</span>', 0];
         }
-        return implode('<br>', $lines);
+        ksort($sortable);
+        return [implode('<br>', array_values($sortable)), $maxPct];
     }
 
     private function statusLabel(string $status): array
@@ -573,13 +675,6 @@ JS;
             case 'overdue': return ['Overdue', 'color:#e65100;font-weight:bold'];
             default:        return [htmlspecialchars($status) ?: '&#8211;', 'color:#555'];
         }
-    }
-
-    private function trafficLight(int $pct): string
-    {
-        if ($pct >= 90) return 'color:#c62828;font-weight:bold';
-        if ($pct >= 70) return 'color:#e65100';
-        return 'color:#2e7d32';
     }
 
     private function renderSelfInsertScript(): string
@@ -663,11 +758,14 @@ JS;
         $raw = file_get_contents($file);
         if ($raw === false) return null;
         $data = json_decode($raw, true);
-        return is_array($data) ? $data : null;
+        if (!is_array($data)) return null;
+        if (($data['version'] ?? 0) !== self::CACHE_VERSION) return null;
+        return $data;
     }
 
     private function saveCache(string $accountNo, array $data): void
     {
+        $data['version'] = self::CACHE_VERSION;
         @file_put_contents($this->getCachePath($accountNo), json_encode($data), LOCK_EX);
     }
 }
