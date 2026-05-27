@@ -267,12 +267,12 @@ HTML;
 
     private function statusLabel(string $status): array
     {
-        return match (strtolower($status)) {
-            'online'  => ['Online',  'color:#2e7d32;font-weight:bold'],
-            'offline' => ['Offline', 'color:#c62828;font-weight:bold'],
-            'overdue' => ['Overdue', 'color:#e65100;font-weight:bold'],
-            default   => [htmlspecialchars($status) ?: '&#8211;', 'color:#555'],
-        };
+        switch (strtolower($status)) {
+            case 'online':  return ['Online',  'color:#2e7d32;font-weight:bold'];
+            case 'offline': return ['Offline', 'color:#c62828;font-weight:bold'];
+            case 'overdue': return ['Overdue', 'color:#e65100;font-weight:bold'];
+            default:        return [htmlspecialchars($status) ?: '&#8211;', 'color:#555'];
+        }
     }
 
     private function trafficLight(int $pct): string
