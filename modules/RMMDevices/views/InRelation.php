@@ -138,6 +138,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         }
         $agentList = $agentsData['results'] ?? $agentsData;
         $this->log("Agents geladen: " . count((array)$agentList));
+        $agentList = $this->enrichAgents((array)$agentList, $rmm_url, $rmm_token);
 
         $html .= $this->renderTable((array)$agentList, $tvFieldIds);
         $html .= $this->renderDebugPanel();
@@ -162,7 +163,7 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_TIMEOUT        => 10,
             CURLOPT_HTTPHEADER     => ['X-API-KEY: ' . $token, 'Content-Type: application/json'],
             CURLOPT_SSL_VERIFYPEER => false,
         ]);
@@ -306,13 +307,46 @@ HTML;
 
     private function extractLanIp(array $agent): string
     {
-        if (!empty($agent['local_ips']) && is_array($agent['local_ips'])) {
-            return (string)reset($agent['local_ips']);
+        $val = $agent['local_ips'] ?? $agent['ip_addresses'] ?? $agent['lanip'] ?? '';
+        if (is_array($val)) {
+            $val = implode(', ', $val);
         }
-        if (!empty($agent['ip_addresses']) && is_array($agent['ip_addresses'])) {
-            return (string)reset($agent['ip_addresses']);
+        $val = trim((string)$val);
+        if (strpos($val, ',') !== false) {
+            $parts = explode(',', $val);
+            return trim($parts[0]);
         }
-        return (string)($agent['lanip'] ?? '');
+        return $val;
+    }
+
+    private function enrichAgents(array $agents, string $rmm_url, string $rmm_token): array
+    {
+        foreach ($agents as &$agent) {
+            $agentId = $agent['agent_id'] ?? $agent['id'] ?? null;
+            if (!$agentId) continue;
+
+            $base = rtrim($rmm_url, '/') . '/agents/' . $agentId;
+
+            [$detail, $err] = $this->rmmGet($base . '/', $rmm_token);
+            if ($err === null && is_array($detail)) {
+                if (!empty($detail['custom_fields'])) {
+                    $agent['custom_fields'] = $detail['custom_fields'];
+                }
+                if (isset($detail['cpu_load'])) {
+                    $agent['cpu_load'] = $detail['cpu_load'];
+                }
+                if (isset($detail['used_ram'])) {
+                    $agent['used_ram'] = $detail['used_ram'];
+                }
+            }
+
+            [$checks, $err2] = $this->rmmGet($base . '/checks/', $rmm_token);
+            if ($err2 === null && is_array($checks)) {
+                $agent['checks_detail'] = $checks;
+            }
+        }
+        unset($agent);
+        return $agents;
     }
 
     private function shortenOs(string $os): string
@@ -388,15 +422,10 @@ HTML;
             }
         }
 
-        // Fallback: agent['checks'] — may contain diskspace check objects
-        $checks = isset($agent['checks']) && is_array($agent['checks']) ? $agent['checks'] : [];
-        $allChecks = [];
-        if (isset($checks['failing']) || isset($checks['passing'])) {
-            $allChecks = array_merge((array)($checks['failing'] ?? []), (array)($checks['passing'] ?? []));
-        } elseif (!isset($checks['total'])) {
-            // flat array of check objects (skip count-only blocks like {total:3, passing:2, ...})
-            $allChecks = $checks;
-        }
+        // Fallback: checks_detail — flat array from /agents/{id}/checks/
+        // Format: [{"check_type":"diskspace","name":"C:\\","more_info":"75.50GB free / 237.43GB total (31%)","status":"passing"}, ...]
+        $allChecks = isset($agent['checks_detail']) && is_array($agent['checks_detail'])
+                     ? $agent['checks_detail'] : [];
 
         foreach ($allChecks as $check) {
             if (!is_array($check)) continue;
@@ -410,7 +439,7 @@ HTML;
             $pct = null;
             if (isset($check['percent_used'])) {
                 $pct = (int)$check['percent_used'];
-            } elseif (isset($check['more_info']) && preg_match('/(\d+)\s*%/', (string)$check['more_info'], $m)) {
+            } elseif (isset($check['more_info']) && preg_match('/\((\d+)%\)/', (string)$check['more_info'], $m)) {
                 $pct = (int)$m[1];
             } elseif (preg_match('/(\d+)\s*%/', $name, $m)) {
                 $pct = (int)$m[1];
