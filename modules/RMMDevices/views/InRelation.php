@@ -30,117 +30,133 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         }
         $this->log("account_no='{$accountNo}'");
 
-        // ── Step 1: Custom Field-Definitionen ────────────────────────────────
-        [$cfDefs, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/core/customfields/', $rmm_token);
-        $siteFieldIds   = [];
-        $clientFieldIds = [];
-        $tvFieldIds     = [];
-        if ($err === null && is_array($cfDefs)) {
-            $cfList = $cfDefs['results'] ?? $cfDefs;
-            foreach ($cfList as $cf) {
-                if (!is_array($cf)) continue;
-                $cfName  = strtolower(trim((string)($cf['name'] ?? '')));
-                $cfId    = isset($cf['id']) ? (int)$cf['id'] : null;
-                $cfModel = strtolower(trim((string)($cf['model'] ?? '')));
-                if ($cfId === null) continue;
-                if ($cfName === 'berlicrm_id') {
-                    if ($cfModel === 'site')   $siteFieldIds[]   = $cfId;
-                    if ($cfModel === 'client') $clientFieldIds[] = $cfId;
-                }
-                if ($cfName === 'teamviewerclientid') {
-                    $tvFieldIds[] = $cfId;
-                }
-            }
-        }
-        $this->log("fieldIds: client=[" . implode(',', $clientFieldIds) . "] site=[" . implode(',', $siteFieldIds) . "] tv=[" . implode(',', $tvFieldIds) . "]");
+        // Refresh-URL für den "Aktualisieren"-Button
+        $refreshUrl = 'index.php?module=' . urlencode($request->getModule())
+            . '&view=Detail&mode=showRelatedList&relatedModule=RMMDevices'
+            . '&record=' . urlencode((string)$accountId)
+            . '&tab_label=' . urlencode((string)$request->get('tab_label'))
+            . '&force_refresh=1';
 
-        // ── Step 2: Verknüpften Client/Site finden ───────────────────────────
-        $trmClientId = null;
-        $trmSiteId   = null;
+        // ── Cache-Check ──────────────────────────────────────────────────────
+        $forceRefresh = ((string)$request->get('force_refresh') === '1');
+        $cached       = $forceRefresh ? null : $this->loadCache($accountNo);
+        $cacheAge     = -1;
+        $tvFieldIds   = [];
 
-        // 2a: Site-Suche direkt über /clients/sites/
-        if (!empty($siteFieldIds)) {
-            $this->log("Suche in /clients/sites/ (siteFieldIds=[" . implode(',', $siteFieldIds) . "])");
-            [$sitesData, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/clients/sites/', $rmm_token);
-            if ($err !== null) {
-                $this->log("FEHLER /clients/sites/: {$err}");
-                $html .= $this->renderAlert('danger', 'TacticalRMM /clients/sites/ nicht erreichbar: ' . htmlspecialchars($err));
-                $html .= $this->renderDebugPanel();
-                $html .= '</div>';
-                $this->sendAndExit($html);
-            }
-            $siteList = $sitesData['results'] ?? $sitesData;
-            $this->log("Sites geladen: " . count((array)$siteList));
-            foreach ((array)$siteList as $site) {
-                if (!is_array($site)) continue;
-                foreach ((array)($site['custom_fields'] ?? []) as $cf) {
-                    if ($this->matchField($cf, $siteFieldIds, $accountNo)) {
-                        $trmSiteId   = (int)($site['id']     ?? 0);
-                        $trmClientId = (int)($site['client'] ?? 0);
-                        $this->log("MATCH Site id={$trmSiteId} client_id={$trmClientId} name='" . ($site['name'] ?? '') . "'");
-                        break 2;
-                    }
-                }
-            }
-        }
-
-        // 2b: Client-Suche über /clients/ (nur wenn kein Site-Match)
-        if ($trmClientId === null && !empty($clientFieldIds)) {
-            $this->log("Suche in /clients/ (clientFieldIds=[" . implode(',', $clientFieldIds) . "])");
-            [$clientsData, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/clients/', $rmm_token);
-            if ($err !== null) {
-                $this->log("FEHLER /clients/: {$err}");
-                $html .= $this->renderAlert('danger', 'TacticalRMM /clients/ nicht erreichbar: ' . htmlspecialchars($err));
-                $html .= $this->renderDebugPanel();
-                $html .= '</div>';
-                $this->sendAndExit($html);
-            }
-            $clientList = $clientsData['results'] ?? $clientsData;
-            $this->log("Clients geladen: " . count((array)$clientList));
-            foreach ((array)$clientList as $client) {
-                if (!is_array($client)) continue;
-                foreach ((array)($client['custom_fields'] ?? []) as $cf) {
-                    if ($this->matchField($cf, $clientFieldIds, $accountNo)) {
-                        $trmClientId = (int)($client['id'] ?? 0);
-                        $this->log("MATCH Client id={$trmClientId} name='" . ($client['name'] ?? '') . "'");
-                        break 2;
-                    }
-                }
-            }
-        }
-
-        if ($trmClientId === null) {
-            $this->log("Kein Match für berlicrm_id='{$accountNo}'");
-            $html .= $this->renderAlert('warning',
-                'Kein TacticalRMM-Client verknüpft (berlicrm_id = <strong>'
-                . htmlspecialchars($accountNo) . '</strong> nicht gefunden).');
-            $html .= $this->renderDebugPanel();
-            $html .= '</div>';
-            $this->sendAndExit($html);
-        }
-
-        // ── Step 3: Agents laden ─────────────────────────────────────────────
-        if ($trmSiteId !== null) {
-            $agentsUrl = rtrim($rmm_url, '/') . '/agents/?site=' . $trmSiteId;
-            $this->log("GET {$agentsUrl}");
+        if ($cached !== null) {
+            $agentList  = (array)($cached['agents']       ?? []);
+            $tvFieldIds = (array)($cached['tv_field_ids'] ?? []);
+            $cacheAge   = time() - (int)($cached['ts']    ?? 0);
+            $this->log("Cache genutzt (Alter: {$cacheAge}s, " . count($agentList) . " Agents)");
         } else {
-            $agentsUrl = rtrim($rmm_url, '/') . '/agents/?client=' . $trmClientId;
+            // ── Step 1: Custom Field-Definitionen ────────────────────────────
+            [$cfDefs, $err]  = $this->rmmGet(rtrim($rmm_url, '/') . '/core/customfields/', $rmm_token);
+            $siteFieldIds    = [];
+            $clientFieldIds  = [];
+            if ($err === null && is_array($cfDefs)) {
+                $cfList = $cfDefs['results'] ?? $cfDefs;
+                foreach ($cfList as $cf) {
+                    if (!is_array($cf)) continue;
+                    $cfName  = strtolower(trim((string)($cf['name'] ?? '')));
+                    $cfId    = isset($cf['id']) ? (int)$cf['id'] : null;
+                    $cfModel = strtolower(trim((string)($cf['model'] ?? '')));
+                    if ($cfId === null) continue;
+                    if ($cfName === 'berlicrm_id') {
+                        if ($cfModel === 'site')   $siteFieldIds[]   = $cfId;
+                        if ($cfModel === 'client') $clientFieldIds[] = $cfId;
+                    }
+                    if ($cfName === 'teamviewerclientid') {
+                        $tvFieldIds[] = $cfId;
+                    }
+                }
+            }
+            $this->log("fieldIds: client=[" . implode(',', $clientFieldIds) . "] site=[" . implode(',', $siteFieldIds) . "] tv=[" . implode(',', $tvFieldIds) . "]");
+
+            // ── Step 2: Verknüpften Client/Site finden ───────────────────────
+            $trmClientId = null;
+            $trmSiteId   = null;
+
+            if (!empty($siteFieldIds)) {
+                $this->log("Suche in /clients/sites/");
+                [$sitesData, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/clients/sites/', $rmm_token);
+                if ($err !== null) {
+                    $html .= $this->renderAlert('danger', 'TacticalRMM /clients/sites/ nicht erreichbar: ' . htmlspecialchars($err));
+                    $html .= $this->renderDebugPanel();
+                    $html .= '</div>';
+                    $this->sendAndExit($html);
+                }
+                $siteList = $sitesData['results'] ?? $sitesData;
+                $this->log("Sites geladen: " . count((array)$siteList));
+                foreach ((array)$siteList as $site) {
+                    if (!is_array($site)) continue;
+                    foreach ((array)($site['custom_fields'] ?? []) as $cf) {
+                        if ($this->matchField($cf, $siteFieldIds, $accountNo)) {
+                            $trmSiteId   = (int)($site['id']     ?? 0);
+                            $trmClientId = (int)($site['client'] ?? 0);
+                            $this->log("MATCH Site id={$trmSiteId} client_id={$trmClientId} name='" . ($site['name'] ?? '') . "'");
+                            break 2;
+                        }
+                    }
+                }
+            }
+
+            if ($trmClientId === null && !empty($clientFieldIds)) {
+                $this->log("Suche in /clients/");
+                [$clientsData, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/clients/', $rmm_token);
+                if ($err !== null) {
+                    $html .= $this->renderAlert('danger', 'TacticalRMM /clients/ nicht erreichbar: ' . htmlspecialchars($err));
+                    $html .= $this->renderDebugPanel();
+                    $html .= '</div>';
+                    $this->sendAndExit($html);
+                }
+                $clientList = $clientsData['results'] ?? $clientsData;
+                foreach ((array)$clientList as $client) {
+                    if (!is_array($client)) continue;
+                    foreach ((array)($client['custom_fields'] ?? []) as $cf) {
+                        if ($this->matchField($cf, $clientFieldIds, $accountNo)) {
+                            $trmClientId = (int)($client['id'] ?? 0);
+                            $this->log("MATCH Client id={$trmClientId} name='" . ($client['name'] ?? '') . "'");
+                            break 2;
+                        }
+                    }
+                }
+            }
+
+            if ($trmClientId === null) {
+                $this->log("Kein Match für berlicrm_id='{$accountNo}'");
+                $html .= $this->renderAlert('warning',
+                    'Kein TacticalRMM-Client verknüpft (berlicrm_id = <strong>'
+                    . htmlspecialchars($accountNo) . '</strong> nicht gefunden).');
+                $html .= $this->renderDebugPanel();
+                $html .= '</div>';
+                $this->sendAndExit($html);
+            }
+
+            // ── Step 3: Agents laden + anreichern ────────────────────────────
+            $agentsUrl = $trmSiteId !== null
+                ? rtrim($rmm_url, '/') . '/agents/?site='   . $trmSiteId
+                : rtrim($rmm_url, '/') . '/agents/?client=' . $trmClientId;
             $this->log("GET {$agentsUrl}");
+
+            [$agentsData, $err] = $this->rmmGet($agentsUrl, $rmm_token);
+            if ($err !== null) {
+                $html .= $this->renderAlert('danger', 'Fehler beim Laden der Agents: ' . htmlspecialchars($err));
+                $html .= $this->renderDebugPanel();
+                $html .= '</div>';
+                $this->sendAndExit($html);
+            }
+            $agentList = array_values((array)($agentsData['results'] ?? $agentsData));
+            $this->log("Agents geladen: " . count($agentList));
+            $agentList = $this->enrichAgents($agentList, $rmm_url, $rmm_token);
+
+            $this->saveCache($accountNo, [
+                'ts'           => time(),
+                'agents'       => $agentList,
+                'tv_field_ids' => $tvFieldIds,
+            ]);
         }
 
-        [$agentsData, $err] = $this->rmmGet($agentsUrl, $rmm_token);
-        if ($err !== null) {
-            $this->log("FEHLER Agents: {$err}");
-            $html .= $this->renderAlert('danger', 'Fehler beim Laden der Agents: ' . htmlspecialchars($err));
-            $html .= $this->renderDebugPanel();
-            $html .= '</div>';
-            $this->sendAndExit($html);
-        }
-        $agentList = $agentsData['results'] ?? $agentsData;
-        $this->log("Agents geladen: " . count((array)$agentList));
-        $agentList = $this->enrichAgents((array)$agentList, $rmm_url, $rmm_token);
-
-        $html .= $this->renderTable((array)$agentList, $tvFieldIds);
+        $html .= $this->renderTable($agentList, $tvFieldIds, $cacheAge, $refreshUrl);
         $html .= $this->renderDebugPanel();
         $html .= '</div>';
         $this->sendAndExit($html);
@@ -231,7 +247,7 @@ HTML;
         return trim($row['account_no']);
     }
 
-    private function renderTable(array $list, array $tvFieldIds = []): string
+    private function renderTable(array $list, array $tvFieldIds = [], int $cacheAge = -1, string $refreshUrl = ''): string
     {
         if (empty($list)) {
             return $this->renderAlert('info', 'Keine Agents für diesen Client gefunden.');
@@ -241,7 +257,7 @@ HTML;
         $td = 'padding:5px 10px;border:1px solid #ddd;vertical-align:top';
         $tdc = $td . ';text-align:center';
 
-        $html  = $this->renderSummary($list);
+        $html  = $this->renderSummary($list, $cacheAge, $refreshUrl);
         $html .= '<table class="table table-bordered listViewEntriesTable" style="width:100%;border-collapse:collapse;font-size:13px">';
         $html .= '<thead><tr class="listViewHeaders" style="background:#f5f5f5">';
         foreach (['Status', 'Hostname', 'LAN IP', 'OS', 'Seriennummer', 'TeamViewer ID', 'Letzter Kontakt', 'Disk Checks', 'CPU %', 'RAM %'] as $col) {
@@ -285,7 +301,7 @@ HTML;
         return $html;
     }
 
-    private function renderSummary(array $list): string
+    private function renderSummary(array $list, int $cacheAge = -1, string $refreshUrl = ''): string
     {
         $total = count($list);
         $online = $offline = $overdue = 0;
@@ -297,11 +313,29 @@ HTML;
                 case 'overdue': $overdue++; break;
             }
         }
+
+        $ageText = $cacheAge >= 0
+            ? ' <span style="font-size:11px;font-weight:normal;color:#888">&bull; Cache: ' . $cacheAge . 's</span>'
+            : '';
+
+        $refreshBtn = '';
+        if ($refreshUrl !== '') {
+            $jsUrl = addslashes($refreshUrl);
+            $refreshBtn = ' <button onclick="'
+                . 'var btn=this;btn.disabled=true;btn.textContent=\'...\';'
+                . 'jQuery.get(\'' . $jsUrl . '\','
+                . 'function(d){jQuery(\'div.details div.contents\').first().html(d);})'
+                . '.fail(function(){location.reload();});return false;"'
+                . ' style="font-size:11px;padding:2px 8px;cursor:pointer;background:#fff;'
+                . 'border:1px solid #bbb;border-radius:3px;margin-left:8px">&#8635; Aktualisieren</button>';
+        }
+
         return '<div style="font-size:13px;font-weight:bold;margin-bottom:8px;color:#333">'
             . $total . ' Agents'
             . ' &nbsp;|&nbsp; <span style="color:#2e7d32">' . $online  . ' Online</span>'
             . ' &nbsp;|&nbsp; <span style="color:#e65100">' . $overdue . ' Overdue</span>'
             . ' &nbsp;|&nbsp; <span style="color:#c62828">' . $offline . ' Offline</span>'
+            . $ageText . $refreshBtn
             . '</div>';
     }
 
@@ -321,28 +355,53 @@ HTML;
 
     private function enrichAgents(array $agents, string $rmm_url, string $rmm_token): array
     {
+        $loggedDetailKeys = false;
+        $loggedCheckKeys  = false;
+
         foreach ($agents as &$agent) {
             $agentId = $agent['agent_id'] ?? $agent['id'] ?? null;
             if (!$agentId) continue;
 
             $base = rtrim($rmm_url, '/') . '/agents/' . $agentId;
 
+            // ── Agent-Detail: custom_fields, CPU, RAM ─────────────────────────
             [$detail, $err] = $this->rmmGet($base . '/', $rmm_token);
             if ($err === null && is_array($detail)) {
+                if (!$loggedDetailKeys) {
+                    $this->log("Agent-Detail-Keys: " . implode(', ', array_keys($detail)));
+                    $loggedDetailKeys = true;
+                }
                 if (!empty($detail['custom_fields'])) {
                     $agent['custom_fields'] = $detail['custom_fields'];
                 }
-                if (isset($detail['cpu_load'])) {
-                    $agent['cpu_load'] = $detail['cpu_load'];
+                // CPU — try common field name variants
+                foreach (['cpu_load', 'cpu', 'cpu_usage'] as $key) {
+                    if (array_key_exists($key, $detail) && $detail[$key] !== null) {
+                        $agent['cpu_load'] = $detail[$key];
+                        break;
+                    }
                 }
-                if (isset($detail['used_ram'])) {
-                    $agent['used_ram'] = $detail['used_ram'];
+                // RAM — try common field name variants
+                foreach (['used_ram', 'ram', 'used_memory', 'memory_usage'] as $key) {
+                    if (array_key_exists($key, $detail) && $detail[$key] !== null) {
+                        $agent['used_ram'] = $detail[$key];
+                        break;
+                    }
                 }
             }
 
+            // ── Checks: disk space ────────────────────────────────────────────
             [$checks, $err2] = $this->rmmGet($base . '/checks/', $rmm_token);
             if ($err2 === null && is_array($checks)) {
-                $agent['checks_detail'] = $checks;
+                $checkList = isset($checks['results']) ? $checks['results'] : $checks;
+                $agent['checks_detail'] = $checkList;
+                if (!$loggedCheckKeys && !empty($checkList)) {
+                    $first = reset($checkList);
+                    if (is_array($first)) {
+                        $this->log("Check-Keys (erster): " . implode(', ', array_keys($first)));
+                    }
+                    $loggedCheckKeys = true;
+                }
             }
         }
         unset($agent);
@@ -539,5 +598,31 @@ JS;
         ];
         [$bg, $fg, $border] = $colors[$type] ?? $colors['info'];
         return '<div style="background:' . $bg . ';color:' . $fg . ';border:1px solid ' . $border . ';padding:10px 14px;border-radius:4px;margin:8px 0">' . $html . '</div>';
+    }
+
+    // ── Cache (5-Minuten TTL, logs/rmm_cache_{account}.json) ─────────────────
+
+    private function getCachePath(string $accountNo): string
+    {
+        $root = realpath(__DIR__ . '/../../..');
+        $dir  = ($root !== false ? $root : __DIR__ . '/../../..') . DIRECTORY_SEPARATOR . 'logs';
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        return $dir . DIRECTORY_SEPARATOR . 'rmm_cache_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $accountNo) . '.json';
+    }
+
+    private function loadCache(string $accountNo): ?array
+    {
+        $file = $this->getCachePath($accountNo);
+        if (!file_exists($file)) return null;
+        if ((time() - filemtime($file)) > 300) return null;
+        $raw = file_get_contents($file);
+        if ($raw === false) return null;
+        $data = json_decode($raw, true);
+        return is_array($data) ? $data : null;
+    }
+
+    private function saveCache(string $accountNo, array $data): void
+    {
+        @file_put_contents($this->getCachePath($accountNo), json_encode($data), LOCK_EX);
     }
 }
