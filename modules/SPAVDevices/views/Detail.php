@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/List.php';
+require_once __DIR__ . '/InRelation.php';
 
-class SPAVDevices_Detail_View extends SPAVDevices_List_View {
+class SPAVDevices_Detail_View extends SPAVDevices_InRelation_View {
 }
