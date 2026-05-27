@@ -13,6 +13,17 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         error_log('RMMDevices_InRelation_View::process CALLED record=' . $request->get('record'));
 
         $accountId = (int) $request->get('record');
+
+        $mode = (string)(isset($_GET['mode']) ? $_GET['mode'] : $request->get('mode'));
+        $isVtigerTab = ($mode === 'showRelatedList')
+                    || !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+                    || !empty($_SERVER['HTTP_X_PJAX']);
+
+        if (!$isVtigerTab && $accountId > 0) {
+            header('Location: index.php?module=Accounts&view=Detail&record=' . $accountId);
+            exit;
+        }
+
         $this->log("=== RMM Tab | accountid={$accountId} | " . date('Y-m-d H:i:s') . " ===");
 
         [$rmm_url, $rmm_token, $rmm_frontend_url, $configError] = $this->loadConfig();
@@ -295,7 +306,7 @@ HTML;
                 $patchHtml    = '<span style="color:#e65100;font-weight:bold">&#9888; Ja</span>';
                 $patchSortVal = '1';
             } else {
-                $patchHtml    = '<span style="color:#999">&#8211;</span>';
+                $patchHtml    = '<span style="color:#2e7d32">&#10003; Ok</span>';
                 $patchSortVal = '0';
             }
 
@@ -783,27 +794,9 @@ JS;
 
     private function sendAndExit(string $html): void
     {
-        // Clean all output buffers so only our partial HTML reaches the browser.
         while (ob_get_level() > 0) {
             ob_end_clean();
         }
-
-        // Detect whether this is an AJAX/tab request or a direct browser hit.
-        // mode=showRelatedList is vtiger's AJAX tab mechanism; X-Requested-With /
-        // X-PJAX are standard AJAX headers (stripped by csrf-magic.js in some
-        // setups, hence the mode check as primary signal).
-        $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
-                  || !empty($_SERVER['HTTP_X_PJAX'])
-                  || (isset($_GET['mode']) && $_GET['mode'] === 'showRelatedList');
-
-        if (!$isAjax) {
-            $accountId = (int)(isset($_REQUEST['record']) ? $_REQUEST['record'] : 0);
-            if ($accountId > 0 && !headers_sent()) {
-                header('Location: index.php?module=Accounts&view=Detail&record=' . $accountId);
-                exit;
-            }
-        }
-
         if (!headers_sent()) {
             header('Content-Type: text/html; charset=UTF-8');
         }
