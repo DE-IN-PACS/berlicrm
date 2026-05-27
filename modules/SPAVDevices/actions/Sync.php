@@ -22,46 +22,55 @@ GQL;
 
     public function process(Vtiger_Request $request): void
     {
+        $log = LoggerManager::getLogger('SPAVDevices');
         header('Content-Type: application/json');
 
         $accountId = (string) $request->get('record');
         $force     = ((string) $request->get('force') === '1');
 
+        $log->debug("SPAVDevices Sync start: accountId={$accountId}, force=" . ($force ? '1' : '0'));
+
         if ($accountId === '' || $accountId === '0') {
+            $log->error('SPAVDevices Sync: Keine Account-ID übergeben');
             echo json_encode(['synced' => false, 'error' => 'Keine Account-ID übergeben']);
             exit();
         }
 
         [$tid, $dbError] = $this->getTenantId((int)$accountId);
         if ($dbError !== null) {
-            error_log('SPAVDevices Sync: DB-Fehler bei getTenantId: ' . $dbError);
-            echo json_encode(['synced' => false, 'error' => 'Datenbankfehler']);
+            $log->error('SPAVDevices Sync: DB-Fehler bei getTenantId: ' . $dbError);
+            echo json_encode(['synced' => false, 'error' => 'Datenbankfehler: ' . $dbError]);
             exit();
         }
         if ($tid === null || trim($tid) === '') {
-            echo json_encode(['synced' => false, 'error' => 'cf_877 ist leer']);
+            $log->warn('SPAVDevices Sync: cf_877 ist leer für accountId=' . $accountId);
+            echo json_encode(['synced' => false, 'error' => 'cf_877 ist leer — Tenant-ID am Account eintragen']);
             exit();
         }
+        $log->debug("SPAVDevices Sync: tid={$tid}");
 
         [$spavUrl, $spavToken, $intervalHours, $cfgError] = SPAVDevicesHelper::loadConfig();
         if ($cfgError !== null) {
-            error_log('SPAVDevices Sync: Konfigurationsfehler: ' . $cfgError);
+            $log->error('SPAVDevices Sync: Konfigurationsfehler: ' . $cfgError);
             echo json_encode(['synced' => false, 'error' => $cfgError]);
             exit();
         }
+        $log->debug("SPAVDevices Sync: config geladen, url={$spavUrl}, interval={$intervalHours}h");
 
         try {
             $pdo      = SPAVDevicesHelper::getPdo();
             $lastSync = $this->getLastSync($pdo, $accountId);
         } catch (Exception $e) {
-            error_log('SPAVDevices Sync: DB-Fehler: ' . $e->getMessage());
-            echo json_encode(['synced' => false, 'error' => 'Datenbankfehler']);
+            $log->error('SPAVDevices Sync: DB-Fehler beim getLastSync: ' . $e->getMessage());
+            echo json_encode(['synced' => false, 'error' => 'Datenbankfehler: ' . $e->getMessage()]);
             exit();
         }
 
         $needsSync = $force
             || $lastSync === null
             || (time() - strtotime($lastSync)) >= ($intervalHours * 3600);
+
+        $log->debug("SPAVDevices Sync: lastSync={$lastSync}, needsSync=" . ($needsSync ? 'ja' : 'nein'));
 
         if (!$needsSync) {
             echo json_encode([
@@ -75,20 +84,23 @@ GQL;
 
         // ── GraphQL-Sync ──────────────────────────────────────────────────────
 
-        [$allDevices, $apiError] = $this->fetchAllDevices($spavUrl, $spavToken, $tid);
+        $log->debug("SPAVDevices Sync: starte GraphQL-Abruf für tid={$tid}");
+        [$allDevices, $apiError] = $this->fetchAllDevices($spavUrl, $spavToken, $tid, $log);
         if ($apiError !== null) {
-            error_log('SPAVDevices Sync: API-Fehler für tid=' . $tid . ': ' . $apiError);
+            $log->error('SPAVDevices Sync: API-Fehler für tid=' . $tid . ': ' . $apiError);
             echo json_encode(['synced' => false, 'error' => $apiError]);
             exit();
         }
+        $log->debug('SPAVDevices Sync: ' . count($allDevices) . ' Geräte von API erhalten');
 
         try {
             $count = $this->persistDevices($pdo, $accountId, $allDevices);
         } catch (Exception $e) {
-            error_log('SPAVDevices Sync: Fehler beim Speichern: ' . $e->getMessage());
-            echo json_encode(['synced' => false, 'error' => 'Fehler beim Speichern der Geräte']);
+            $log->error('SPAVDevices Sync: Fehler beim Speichern: ' . $e->getMessage());
+            echo json_encode(['synced' => false, 'error' => 'DB-Fehler beim Speichern: ' . $e->getMessage()]);
             exit();
         }
+        $log->debug("SPAVDevices Sync: {$count} Geräte gespeichert/aktualisiert");
 
         $newLastSync = date('Y-m-d H:i:s');
         echo json_encode([
@@ -134,16 +146,13 @@ GQL;
         return (int)$stmt->fetchColumn();
     }
 
-    /**
-     * Fetches all pages from the SP AV GraphQL API.
-     * Returns [devices_array, error_string_or_null].
-     */
-    private function fetchAllDevices(string $url, string $token, string $tid): array
+    private function fetchAllDevices(string $url, string $token, string $tid, $log): array
     {
         $all  = [];
         $page = 1;
 
         do {
+            $log->debug("SPAVDevices fetchAllDevices: Seite {$page}");
             [$data, $err] = SPAVDevicesHelper::graphqlPost($url, $token, self::GQL_QUERY, [
                 'tid'   => $tid,
                 'first' => 100,
@@ -151,11 +160,13 @@ GQL;
             ]);
 
             if ($err !== null) {
+                $log->error("SPAVDevices fetchAllDevices Seite {$page} Fehler: {$err}");
                 return [null, $err];
             }
 
             $devices  = (array)($data['data']['devices']['data']          ?? []);
             $hasMore  = (bool)($data['data']['devices']['paginatorInfo']['hasMorePages'] ?? false);
+            $log->debug("SPAVDevices fetchAllDevices Seite {$page}: " . count($devices) . " Geräte, hasMore=" . ($hasMore ? 'ja' : 'nein'));
 
             foreach ($devices as $dev) {
                 if (is_array($dev)) {
@@ -169,10 +180,6 @@ GQL;
         return [$all, null];
     }
 
-    /**
-     * Upserts all API devices and marks missing ones as lost.
-     * Returns total active device count.
-     */
     private function persistDevices(PDO $pdo, string $accountId, array $apiDevices): int
     {
         $apiIds = [];
@@ -237,7 +244,6 @@ GQL;
             ]);
         }
 
-        // Geräte die nicht mehr in der API sind als "lost" markieren
         if (empty($apiIds)) {
             $stmt = $pdo->prepare(
                 "UPDATE mft_spav_devices
