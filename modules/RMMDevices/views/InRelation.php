@@ -14,12 +14,15 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
 
         $accountId = (int) $request->get('record');
 
-        $mode = (string)(isset($_GET['mode']) ? $_GET['mode'] : $request->get('mode'));
-        $isVtigerTab = ($mode === 'showRelatedList')
-                    || !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
-                    || !empty($_SERVER['HTTP_X_PJAX']);
+        $mode   = (string)(isset($_GET['mode']) ? $_GET['mode'] : '');
+        $view   = (string)(isset($_GET['view'])  ? $_GET['view']  : '');
+        $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+               || !empty($_SERVER['HTTP_X_PJAX']);
+        $isTab  = ($mode === 'showRelatedList')
+               || ($view === 'RMMTab')
+               || $isAjax;
 
-        if (!$isVtigerTab && $accountId > 0) {
+        if (!$isTab && $accountId > 0) {
             header('Location: index.php?module=Accounts&view=Detail&record=' . $accountId);
             exit;
         }
@@ -499,10 +502,9 @@ if (typeof rmmRefresh === 'undefined') {
         $.ajax({
             url: 'index.php',
             data: {
-                module: 'RMMDevices',
-                view: 'Detail',
+                module: 'Accounts',
+                view:   'RMMTab',
                 record: record,
-                mode: 'showRelatedList',
                 force_refresh: '1',
                 _: Date.now()
             },
