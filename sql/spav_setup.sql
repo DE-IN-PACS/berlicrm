@@ -30,25 +30,57 @@ CREATE TABLE IF NOT EXISTS `mft_spav_devices` (
     KEY `idx_last_sync`  (`last_sync`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ── Related Tab in vtiger_relatedlists registrieren ──────────────────────────
--- Nur ausführen wenn der Eintrag noch nicht existiert.
+-- ── Schritt 1: Fehlerhaften Eintrag (relation_id=0) entfernen ────────────────
+
+DELETE FROM `vtiger_relatedlists`
+WHERE `name` = 'get_spav_devices'
+  AND `relation_id` = 0;
+
+-- ── Schritt 2: SPAVDevices in vtiger_tab registrieren ────────────────────────
+-- tabid ist kein AUTO_INCREMENT → expliziten Wert setzen.
+-- presence=0 → Modul taucht NICHT in der Navigation auf (reiner Stub).
+
+INSERT INTO `vtiger_tab`
+    (`tabid`, `name`, `presence`, `tabsequence`, `tablabel`,
+     `customized`, `ownedby`, `isentitytype`, `trial`, `version`, `parent`)
+SELECT
+    (SELECT MAX(`tabid`) + 1 FROM `vtiger_tab`)  AS tabid,
+    'SPAVDevices',
+    0,
+    (SELECT MAX(`tabsequence`) + 1 FROM `vtiger_tab`),
+    'AV Clients',
+    1,
+    0,
+    0,
+    0,
+    '1.0',
+    NULL
+WHERE NOT EXISTS (
+    SELECT 1 FROM `vtiger_tab` WHERE `name` = 'SPAVDevices'
+);
+
+-- ── Schritt 3: Related Tab registrieren ──────────────────────────────────────
+-- relation_id kommt aus vtiger_relatedlists_seq (kein AUTO_INCREMENT!).
 
 INSERT INTO `vtiger_relatedlists`
-    (`tabid`, `related_tabid`, `name`, `sequence`, `label`, `presence`, `actions`)
+    (`relation_id`, `tabid`, `related_tabid`, `name`, `sequence`, `label`, `presence`, `actions`)
 SELECT
-    vt.`tabid`,
-    0,
+    (SELECT `id` + 1 FROM `vtiger_relatedlists_seq`)             AS relation_id,
+    (SELECT `tabid` FROM `vtiger_tab` WHERE `name` = 'Accounts') AS tabid,
+    (SELECT `tabid` FROM `vtiger_tab` WHERE `name` = 'SPAVDevices') AS related_tabid,
     'get_spav_devices',
     (SELECT COALESCE(MAX(r2.`sequence`), 0) + 1
      FROM `vtiger_relatedlists` r2
-     WHERE r2.`tabid` = vt.`tabid`),
+     WHERE r2.`tabid` = (SELECT `tabid` FROM `vtiger_tab` WHERE `name` = 'Accounts')),
     'AV Clients',
     0,
     ''
-FROM `vtiger_tab` vt
-WHERE vt.`name` = 'Accounts'
-  AND NOT EXISTS (
-      SELECT 1 FROM `vtiger_relatedlists` rl
-      WHERE rl.`tabid` = vt.`tabid`
-        AND rl.`name`  = 'get_spav_devices'
-  );
+WHERE NOT EXISTS (
+    SELECT 1 FROM `vtiger_relatedlists`
+    WHERE `name` = 'get_spav_devices'
+);
+
+-- ── Schritt 4: Sequenz nachführen ────────────────────────────────────────────
+
+UPDATE `vtiger_relatedlists_seq`
+SET    `id` = (SELECT MAX(`relation_id`) FROM `vtiger_relatedlists`);
