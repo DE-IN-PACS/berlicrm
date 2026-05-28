@@ -47,11 +47,15 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
         $cached       = $forceRefresh ? null : $this->loadCache($accountNo);
         $cacheAge     = -1;
         $tvFieldIds   = [];
+        $trmSiteId    = 0;
+        $trmClientId  = 0;
 
         if ($cached !== null) {
-            $agentList  = (array)($cached['agents']       ?? []);
-            $tvFieldIds = (array)($cached['tv_field_ids'] ?? []);
-            $cacheAge   = time() - (int)($cached['ts']    ?? 0);
+            $agentList   = (array)($cached['agents']       ?? []);
+            $tvFieldIds  = (array)($cached['tv_field_ids'] ?? []);
+            $trmSiteId   = (int)($cached['trm_site_id']   ?? 0);
+            $trmClientId = (int)($cached['trm_client_id'] ?? 0);
+            $cacheAge    = time() - (int)($cached['ts']    ?? 0);
             $this->log("Cache genutzt (Alter: {$cacheAge}s, " . count($agentList) . " Agents)");
         } else {
             [$cfDefs, $err] = $this->rmmGet(rtrim($rmm_url, '/') . '/core/customfields/', $rmm_token);
@@ -153,15 +157,19 @@ class RMMDevices_InRelation_View extends Vtiger_RelatedList_View {
             $this->log("Agents geladen: " . count($agentList));
             $agentList = $this->enrichAgents($agentList, $rmm_url, $rmm_token);
 
+            $trmSiteId   = (int)($trmSiteId   ?? 0);
+            $trmClientId = (int)($trmClientId ?? 0);
             $this->saveCache($accountNo, [
-                'ts'           => time(),
-                'agents'       => $agentList,
-                'tv_field_ids' => $tvFieldIds,
+                'ts'            => time(),
+                'agents'        => $agentList,
+                'tv_field_ids'  => $tvFieldIds,
+                'trm_site_id'   => $trmSiteId,
+                'trm_client_id' => $trmClientId,
             ]);
         }
 
         $html = str_replace('data-agent-count="0"', 'data-agent-count="' . count($agentList) . '"', $html);
-        $html .= $this->renderTable($agentList, $tvFieldIds, $cacheAge, $refreshUrl, $rmm_frontend_url);
+        $html .= $this->renderTable($agentList, $tvFieldIds, $cacheAge, $refreshUrl, $rmm_frontend_url, $trmSiteId, $trmClientId);
         $html .= $this->renderDebugPanel();
         $html .= '</div>';
         $this->outputHtml($html, $request);
@@ -249,7 +257,7 @@ HTML;
         return trim($row['account_no']);
     }
 
-    private function renderTable(array $list, array $tvFieldIds = [], int $cacheAge = -1, string $refreshUrl = '', string $rmmFrontendUrl = ''): string
+    private function renderTable(array $list, array $tvFieldIds = [], int $cacheAge = -1, string $refreshUrl = '', string $rmmFrontendUrl = '', int $trmSiteId = 0, int $trmClientId = 0): string
     {
         if (empty($list)) {
             return $this->renderAlert('info', 'Keine Agents für diesen Client gefunden.');
@@ -260,7 +268,7 @@ HTML;
         $td  = 'padding:5px 10px;border:1px solid #ddd;vertical-align:top';
         $tdc = $td . ';text-align:center';
 
-        $html  = $this->renderSummary($list, $cacheAge, $refreshUrl);
+        $html  = $this->renderSummary($list, $cacheAge, $refreshUrl, $rmmFrontendUrl, $trmSiteId, $trmClientId);
         $html .= $this->renderFilterBar();
         $html .= $this->renderTakeControlScript();
         $html .= '<table class="table table-bordered listViewEntriesTable" style="width:100%;border-collapse:collapse;font-size:13px">';
@@ -571,7 +579,7 @@ if (typeof rmmTakeControl === 'undefined') {
 JS;
     }
 
-    private function renderSummary(array $list, int $cacheAge = -1, string $refreshUrl = ''): string
+    private function renderSummary(array $list, int $cacheAge = -1, string $refreshUrl = '', string $rmmFrontendUrl = '', int $trmSiteId = 0, int $trmClientId = 0): string
     {
         $total = count($list);
         $online = $offline = $overdue = 0;
@@ -587,6 +595,35 @@ JS;
         $ageText = $cacheAge >= 0
             ? ' <span style="font-size:11px;font-weight:normal;color:#888">&bull; Cache: ' . $cacheAge . 's</span>'
             : '';
+
+        // Quick-links to TRMM web UI
+        $trmmButtons = '';
+        if ($rmmFrontendUrl !== '') {
+            $bs = 'font-size:11px;padding:2px 8px;border-radius:3px;cursor:pointer;border:1px solid;'
+                . 'white-space:nowrap;margin-right:4px;background:#1976d2;color:#fff;border-color:#1565c0';
+            $base = rtrim($rmmFrontendUrl, '/');
+
+            $urlDirect = addslashes($base . '/');
+            $trmmButtons .= '<button style="' . $bs . '" '
+                . 'onclick="window.open(\'' . $urlDirect . '\',\'_blank\',\'noopener,noreferrer\')">'
+                . '&#8599; TRMM</button>';
+
+            if ($trmClientId > 0) {
+                $urlClient = addslashes($base . '/?client=' . $trmClientId);
+                $trmmButtons .= '<button style="' . $bs . '" '
+                    . 'onclick="window.open(\'' . $urlClient . '\',\'_blank\',\'noopener,noreferrer\')">'
+                    . '&#8599; Client ' . $trmClientId . '</button>';
+            }
+
+            if ($trmSiteId > 0) {
+                $urlSite = addslashes($base . '/?site=' . $trmSiteId);
+                $trmmButtons .= '<button style="' . $bs . '" '
+                    . 'onclick="window.open(\'' . $urlSite . '\',\'_blank\',\'noopener,noreferrer\')">'
+                    . '&#8599; Site ' . $trmSiteId . '</button>';
+            }
+
+            $trmmButtons = '<div style="margin-bottom:6px">' . $trmmButtons . '</div>';
+        }
 
         $refreshScript = '';
         $refreshBtn    = '';
@@ -641,6 +678,7 @@ JS;
         }
 
         return $refreshScript
+            . $trmmButtons
             . '<div style="font-size:13px;font-weight:bold;margin-bottom:8px;color:#333">'
             . $total . ' Agents'
             . ' &nbsp;|&nbsp; <span style="color:#2e7d32">' . $online  . ' Online</span>'
