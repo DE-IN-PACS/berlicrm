@@ -520,8 +520,8 @@ JS;
         $html = '';
 
         if ($rmmFrontendUrl !== '') {
-            $hostname = (string)($agent['hostname'] ?? '');
-            $trmmUrl  = addslashes(rtrim($rmmFrontendUrl, '/') . '/?search=' . urlencode($hostname));
+            $agentUuid = (string)($agent['agent_id'] ?? $agent['id'] ?? '');
+            $trmmUrl   = addslashes(rtrim($rmmFrontendUrl, '/') . '/agents/' . rawurlencode($agentUuid));
             $html .= '<button style="' . $bB . '" onclick="window.open(\'' . $trmmUrl . '\',\'_blank\',\'noopener,noreferrer\')">TRMM</button>';
         }
 
