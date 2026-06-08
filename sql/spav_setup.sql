@@ -84,3 +84,30 @@ WHERE NOT EXISTS (
 
 UPDATE `vtiger_relatedlists_seq`
 SET    `id` = (SELECT MAX(`relation_id`) FROM `vtiger_relatedlists`);
+
+-- ── Schritt 5: Profil-Berechtigungen für Nicht-Admin-User ────────────────────
+-- vtiger prüft vtiger_profile2tab für jeden Nicht-Admin-User.
+-- Fehlt ein Eintrag für tabid=63 (SPAVDevices) oder tabid=62 (RMMDevices),
+-- schlägt isPermitted('SPAVDevices','DetailView') fehl → Tab wird ausgeblendet.
+-- permissions=0 = erlaubt, permissions=1 = gesperrt.
+
+INSERT INTO `vtiger_profile2tab` (`profileid`, `tabid`, `permissions`)
+SELECT p.`profileid`, 63, 0
+FROM   `vtiger_profile` p
+WHERE  NOT EXISTS (
+    SELECT 1 FROM `vtiger_profile2tab` x
+    WHERE x.`profileid` = p.`profileid` AND x.`tabid` = 63
+);
+
+INSERT INTO `vtiger_profile2tab` (`profileid`, `tabid`, `permissions`)
+SELECT p.`profileid`, 62, 0
+FROM   `vtiger_profile` p
+WHERE  NOT EXISTS (
+    SELECT 1 FROM `vtiger_profile2tab` x
+    WHERE x.`profileid` = p.`profileid` AND x.`tabid` = 62
+);
+
+-- ── Schritt 6: tabsequence auf -1 korrigieren (falls noch nicht erledigt) ────
+
+UPDATE `vtiger_tab` SET `tabsequence` = -1 WHERE `name` = 'SPAVDevices' AND `tabsequence` != -1;
+UPDATE `vtiger_tab` SET `tabsequence` = -1 WHERE `name` = 'RMMDevices'  AND `tabsequence` != -1;
