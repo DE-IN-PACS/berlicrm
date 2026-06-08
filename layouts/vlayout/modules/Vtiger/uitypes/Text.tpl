@@ -43,6 +43,9 @@
     <script type="text/javascript">
         CKEDITOR.replace('{$MODULE}_editView_fieldName_{$FIELD_NAME}', {ldelim}
             extraPlugins: 'base64image',
+            width: '100%',
+            height: 350,
+            resize_enabled: true,
             toolbar: [
                 {ldelim} name: 'document',    items: ['Source'] {rdelim},
                 {ldelim} name: 'clipboard',   items: ['Cut','Copy','Paste','PasteText','PasteFromWord','-','Undo','Redo'] {rdelim},

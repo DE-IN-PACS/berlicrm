@@ -81,7 +81,7 @@
                         {foreach key=FIELD_NAME item=FIELD_MODEL from=$BLOCK_FIELDS name=blockfields}
 
                             {assign var="isReferenceField" value=$FIELD_MODEL->getFieldDataType()}
-                            {if $FIELD_MODEL->get('uitype') eq "20" or $FIELD_MODEL->get('uitype') eq "19"}
+                            {if $FIELD_MODEL->get('uitype') eq "20" or $FIELD_MODEL->get('uitype') eq "19" or $FIELD_MODEL->get('uitype') eq "21"}
                                 {if $COUNTER eq '1'}
                                     <td class="{$WIDTHTYPE}"></td><td class="{$WIDTHTYPE}"></td>
                                 </tr>
@@ -132,7 +132,7 @@
                     {if $isReferenceField neq "reference"}</label>{/if}
             </td>
             {if $FIELD_MODEL->get('uitype') neq "83"}
-                <td class="fieldValue {$WIDTHTYPE}" {if $FIELD_MODEL->get('uitype') eq '19' or $FIELD_MODEL->get('uitype') eq '20'} colspan="3" {assign var=COUNTER value=$COUNTER+1} {/if}>
+                <td class="fieldValue {$WIDTHTYPE}" {if $FIELD_MODEL->get('uitype') eq '19' or $FIELD_MODEL->get('uitype') eq '20' or $FIELD_MODEL->get('uitype') eq '21'} colspan="3" {assign var=COUNTER value=$COUNTER+1} {/if}>
                     <div class="row-fluid">
 					{if $MODULE eq 'Documents' && $FIELD_MODEL->get('name') eq 'notecontent'}
                         <span>
@@ -144,7 +144,7 @@
                     </div>
                 </td>
             {/if}
-            {if $BLOCK_FIELDS|@count eq 1 and $FIELD_MODEL->get('uitype') neq "19" and $FIELD_MODEL->get('uitype') neq "20" and $FIELD_MODEL->get('uitype') neq "30" and $FIELD_MODEL->get('name') neq "recurringtype"}
+            {if $BLOCK_FIELDS|@count eq 1 and $FIELD_MODEL->get('uitype') neq "19" and $FIELD_MODEL->get('uitype') neq "20" and $FIELD_MODEL->get('uitype') neq "21" and $FIELD_MODEL->get('uitype') neq "30" and $FIELD_MODEL->get('name') neq "recurringtype"}
                 <td class="{$WIDTHTYPE}"></td><td class="{$WIDTHTYPE}"></td>
             {/if}
             {if $MODULE eq 'Events' && $BLOCK_LABEL eq 'LBL_EVENT_INFORMATION' && $smarty.foreach.blockfields.last }
