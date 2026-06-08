@@ -1109,5 +1109,9 @@ $jsLanguageStrings = array(
 	'JS_DUPLICATE_LABEL' => 'keine Umbenennung, Duplikat erkannt',
 	'JS_LENGTHEXCEEDED' => 'der Feldname ist zu lang, bis zu 50 Zeichen sind erlaubt',
 
+	'LBL_COMMENT_DROP_FILES' => 'Dateien hier ablegen oder klicken zur Dateiauswahl',
+	'LBL_COMMENT_LINK_PLACEHOLDER' => 'NAS/SMB/URL einfügen, z.B. \\\\server\share\datei.pdf',
+	'LBL_COMMENT_LINK_DOCUMENT' => 'CRM-Dokument verknüpfen',
+
 );
 ?>
