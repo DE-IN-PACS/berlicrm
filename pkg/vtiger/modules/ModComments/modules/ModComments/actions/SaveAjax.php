@@ -160,6 +160,11 @@ class ModComments_SaveAjax_Action extends Vtiger_SaveAjax_Action {
 	protected function saveDocumentLinks($commentId, $documentIds) {
 		global $adb;
 
+		$tableCheck = $adb->pquery("SHOW TABLES LIKE 'vtiger_modcomments_docrel'", array());
+		if ($adb->num_rows($tableCheck) == 0) {
+			return;
+		}
+
 		foreach ($documentIds as $documentId) {
 			$documentId = intval($documentId);
 			if ($documentId <= 0) continue;
