@@ -137,7 +137,12 @@
 						{/if} 
 					> 
 						{if $FIELD_MODEL->get('uitype') eq '21'}
-							{decode_html($FIELD_MODEL->get('fieldvalue')|unescape:'html')}
+							{assign var="faq_val" value=$FIELD_MODEL->get('fieldvalue')}
+							{if $faq_val eq $faq_val|strip_tags}
+								<div style="white-space: pre-wrap;">{$faq_val|escape:'html'}</div>
+							{else}
+								{decode_html($faq_val|unescape:'html')}
+							{/if}
 						{else}
 							{include file=vtemplate_path($FIELD_MODEL->getUITypeModel()->getDetailViewTemplateName(),$MODULE_NAME) FIELD_MODEL=$FIELD_MODEL USER_MODEL=$USER_MODEL MODULE=$MODULE_NAME RECORD=$RECORD}
 						{/if}
