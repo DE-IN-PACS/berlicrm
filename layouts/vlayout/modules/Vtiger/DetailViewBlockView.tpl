@@ -127,8 +127,8 @@
 
 				<td class="fieldValue {$WIDTHTYPE}" 
 					id="{$MODULE_NAME}_detailView_fieldValue_{$FIELD_MODEL->getName()}" 
-					{if $FIELD_MODEL->get('uitype') eq '19' or $FIELD_MODEL->get('uitype') eq '20' or ($FIELD_MODEL->get('uitype') eq '21' &&  $FIELD_MODEL->get('name') eq 'signature')} 
-						colspan="3" {assign var=COUNTER value=$COUNTER+1} 
+					{if $FIELD_MODEL->get('uitype') eq '19' or $FIELD_MODEL->get('uitype') eq '20' or $FIELD_MODEL->get('uitype') eq '21'}
+						colspan="3" {assign var=COUNTER value=$COUNTER+1}
 					{/if}
 				>
 					<span class="value" data-field-type="{$FIELD_MODEL->getFieldDataType()}" 
@@ -136,7 +136,7 @@
 							style="white-space:normal;" 
 						{/if} 
 					> 
-						{if $FIELD_MODEL->get('uitype') eq '21' &&  $FIELD_MODEL->get('name') eq 'signature'}
+						{if $FIELD_MODEL->get('uitype') eq '21'}
 							{decode_html($FIELD_MODEL->get('fieldvalue')|unescape:'html')}
 						{else}
 							{include file=vtemplate_path($FIELD_MODEL->getUITypeModel()->getDetailViewTemplateName(),$MODULE_NAME) FIELD_MODEL=$FIELD_MODEL USER_MODEL=$USER_MODEL MODULE=$MODULE_NAME RECORD=$RECORD}
@@ -160,12 +160,8 @@
 				</td>
 			{/if}
 
-			{if $FIELD_MODEL_LIST|@count eq 1 and $FIELD_MODEL->get('uitype') neq "19" and $FIELD_MODEL->get('uitype') neq "20" and $FIELD_MODEL->get('uitype') neq "30" and $FIELD_MODEL->get('name') neq "recurringtype" and $FIELD_MODEL->get('uitype') neq "69" and $FIELD_MODEL->get('uitype') neq "105"}
-				{if $FIELD_MODEL->get('uitype') eq "21" &&  $FIELD_MODEL->get('name') eq 'signature'}
-					<table class="table table-bordered detailview-table">
-				{else}
-					<td class="fieldLabel {$WIDTHTYPE}"></td><td class="{$WIDTHTYPE}"></td>
-				{/if}
+			{if $FIELD_MODEL_LIST|@count eq 1 and $FIELD_MODEL->get('uitype') neq "19" and $FIELD_MODEL->get('uitype') neq "20" and $FIELD_MODEL->get('uitype') neq "21" and $FIELD_MODEL->get('uitype') neq "30" and $FIELD_MODEL->get('name') neq "recurringtype" and $FIELD_MODEL->get('uitype') neq "69" and $FIELD_MODEL->get('uitype') neq "105"}
+				<td class="fieldLabel {$WIDTHTYPE}"></td><td class="{$WIDTHTYPE}"></td>
 			{/if}
 
 		{/foreach}

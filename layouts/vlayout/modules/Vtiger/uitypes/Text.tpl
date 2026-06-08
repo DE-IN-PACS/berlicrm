@@ -29,23 +29,31 @@
 {/if}
 
 {if $FIELD_MODEL->get('uitype') eq '21'}
-    {if $FIELD_MODEL->get('name') eq 'signature'}
-        
-        <script type="text/javascript" src="libraries/jquery/ckeditor/ckeditor.js">
-        </script>
-        
-        <textarea id="{$MODULE}_editView_fieldName_{$FIELD_NAME}" class="span11 {if $FIELD_MODEL->isNameField()}nameField{/if}" name="{$FIELD_MODEL->getFieldName()}" {if $FIELD_NAME eq "notecontent"}id="{$FIELD_NAME}"{/if} data-validation-engine="validate[{if $FIELD_MODEL->isMandatory() eq true}required,{/if}funcCall[Vtiger_Base_Validator_Js.invokeValidation]]" data-fieldinfo='{$FIELD_MODEL->getFieldInfo()|@json_encode:JSON_HEX_APOS}' {if !empty($SPECIAL_VALIDATOR)}data-validator='{$SPECIAL_VALIDATOR|@json_encode:JSON_HEX_APOS}'}{/if}>
-            {$FIELD_MODEL->get('fieldvalue')}
-        </textarea>
+    <script type="text/javascript" src="libraries/jquery/ckeditor/ckeditor.js"></script>
 
-        <script type="text/javascript">
-            CKEDITOR.replace( 'signature');
-        </script>
-        
+    <textarea id="{$MODULE}_editView_fieldName_{$FIELD_NAME}" class="span11 {if $FIELD_MODEL->isNameField()}nameField{/if}" name="{$FIELD_MODEL->getFieldName()}" {if $FIELD_NAME eq "notecontent"}id="{$FIELD_NAME}"{/if} data-validation-engine="validate[{if $FIELD_MODEL->isMandatory() eq true}required,{/if}funcCall[Vtiger_Base_Validator_Js.invokeValidation]]" data-fieldinfo='{$FIELD_MODEL->getFieldInfo()|@json_encode:JSON_HEX_APOS}' {if !empty($SPECIAL_VALIDATOR)}data-validator='{$SPECIAL_VALIDATOR|@json_encode:JSON_HEX_APOS}'}{/if}>
+        {$FIELD_MODEL->get('fieldvalue')}
+    </textarea>
+
+    {if $FIELD_MODEL->get('name') eq 'signature'}
+    <script type="text/javascript">
+        CKEDITOR.replace('signature');
+    </script>
     {else}
-        <textarea id="{$MODULE}_editView_fieldName_{$FIELD_NAME}" class="span11 {if $FIELD_MODEL->isNameField()}nameField{/if}" name="{$FIELD_MODEL->getFieldName()}" {if $FIELD_NAME eq "notecontent"}id="{$FIELD_NAME}"{/if} data-validation-engine="validate[{if $FIELD_MODEL->isMandatory() eq true}required,{/if}funcCall[Vtiger_Base_Validator_Js.invokeValidation]]" data-fieldinfo='{$FIELD_MODEL->getFieldInfo()|@json_encode:JSON_HEX_APOS}' {if !empty($SPECIAL_VALIDATOR)}data-validator='{$SPECIAL_VALIDATOR|@json_encode:JSON_HEX_APOS}'}{/if}>
-            {$FIELD_MODEL->get('fieldvalue')}
-        </textarea>
+    <script type="text/javascript">
+        CKEDITOR.replace('{$MODULE}_editView_fieldName_{$FIELD_NAME}', {ldelim}
+            extraPlugins: 'base64image',
+            toolbar: [
+                {ldelim} name: 'document',    items: ['Source'] {rdelim},
+                {ldelim} name: 'clipboard',   items: ['Cut','Copy','Paste','PasteText','PasteFromWord','-','Undo','Redo'] {rdelim},
+                {ldelim} name: 'basicstyles', items: ['Bold','Italic','Underline','Strike','-','RemoveFormat'] {rdelim},
+                {ldelim} name: 'paragraph',   items: ['NumberedList','BulletedList','-','Outdent','Indent','-','Blockquote'] {rdelim},
+                {ldelim} name: 'links',       items: ['Link','Unlink'] {rdelim},
+                {ldelim} name: 'insert',      items: ['base64image','Table','HorizontalRule'] {rdelim},
+                {ldelim} name: 'styles',      items: ['Styles','Format'] {rdelim}
+            ]
+        {rdelim});
+    </script>
     {/if}
 {/if}
 
