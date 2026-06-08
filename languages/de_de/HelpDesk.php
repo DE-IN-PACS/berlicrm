@@ -84,11 +84,6 @@ $languageStrings = array(
 	'Wait For Response'=>'warte auf Zuarbeit',
 );
 
-	'LBL_COMMENT_DROP_FILES' => 'Dateien hier ablegen oder klicken zur Dateiauswahl',
-	'LBL_COMMENT_LINK_PLACEHOLDER' => 'NAS/SMB/URL einfügen, z.B. \\\\server\share\datei.pdf',
-	'LBL_COMMENT_LINK_DOCUMENT' => 'CRM-Dokument verknüpfen',
-);
-
 $jsLanguageStrings = array(
 	'of' => 'von',
 	'to' => 'bis',

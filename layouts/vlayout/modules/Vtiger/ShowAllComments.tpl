@@ -26,17 +26,17 @@
 				</div>
 				<div class="commentAttachmentsArea" style="margin-top:6px;">
 					<div class="commentDropZone" style="border:2px dashed #ccc;border-radius:4px;padding:8px 12px;cursor:pointer;color:#888;font-size:12px;margin-bottom:4px;">
-						<i class="icon-upload"></i> {vtranslate('LBL_COMMENT_DROP_FILES', $MODULE_NAME)}
+						<i class="icon-upload"></i> Dateien hier ablegen oder klicken
 						<input type="file" name="comment_files[]" class="commentFileInput" multiple style="display:none;" />
 					</div>
 					<ul class="commentFileList" style="list-style:none;margin:0;padding:0;font-size:12px;"></ul>
 					<div class="commentLinkArea" style="margin-top:4px;display:flex;gap:6px;align-items:center;">
-						<input type="text" class="commentLinkInput input-block-level" placeholder="{vtranslate('LBL_COMMENT_LINK_PLACEHOLDER', $MODULE_NAME)}" style="font-size:12px;flex:1;" />
+						<input type="text" class="commentLinkInput input-block-level" placeholder="NAS/SMB/URL einfügen..." style="font-size:12px;flex:1;" />
 						<button type="button" class="btn btn-mini commentAddLinkBtn"><i class="icon-plus"></i> {vtranslate('LBL_ADD', $MODULE_NAME)}</button>
 					</div>
 					<ul class="commentLinkList" style="list-style:none;margin:2px 0 0;padding:0;font-size:12px;"></ul>
 					<div style="margin-top:4px;">
-						<button type="button" class="btn btn-mini commentSelectDocBtn"><i class="icon-file"></i> {vtranslate('LBL_COMMENT_LINK_DOCUMENT', $MODULE_NAME)}</button>
+						<button type="button" class="btn btn-mini commentSelectDocBtn"><i class="icon-file"></i> CRM-Dokument verknüpfen</button>
 					</div>
 					<ul class="commentDocList" style="list-style:none;margin:2px 0 0;padding:0;font-size:12px;"></ul>
 				</div>
@@ -74,17 +74,17 @@
 						placeholder="{vtranslate('LBL_ADD_YOUR_COMMENT_HERE', $MODULE_NAME)}"></textarea>
 					<div class="commentAttachmentsArea" style="margin-top:6px;">
 						<div class="commentDropZone" style="border:2px dashed #ccc;border-radius:4px;padding:8px 12px;cursor:pointer;color:#888;font-size:12px;margin-bottom:4px;">
-							<i class="icon-upload"></i> {vtranslate('LBL_COMMENT_DROP_FILES', $MODULE_NAME)}
+							<i class="icon-upload"></i> Dateien hier ablegen oder klicken
 							<input type="file" name="comment_files[]" class="commentFileInput" multiple style="display:none;" />
 						</div>
 						<ul class="commentFileList" style="list-style:none;margin:0;padding:0;font-size:12px;"></ul>
 						<div class="commentLinkArea" style="margin-top:4px;display:flex;gap:6px;align-items:center;">
-							<input type="text" class="commentLinkInput input-block-level" placeholder="{vtranslate('LBL_COMMENT_LINK_PLACEHOLDER', $MODULE_NAME)}" style="font-size:12px;flex:1;" />
+							<input type="text" class="commentLinkInput input-block-level" placeholder="NAS/SMB/URL einfügen..." style="font-size:12px;flex:1;" />
 							<button type="button" class="btn btn-mini commentAddLinkBtn"><i class="icon-plus"></i> {vtranslate('LBL_ADD', $MODULE_NAME)}</button>
 						</div>
 						<ul class="commentLinkList" style="list-style:none;margin:2px 0 0;padding:0;font-size:12px;"></ul>
 						<div style="margin-top:4px;">
-							<button type="button" class="btn btn-mini commentSelectDocBtn"><i class="icon-file"></i> {vtranslate('LBL_COMMENT_LINK_DOCUMENT', $MODULE_NAME)}</button>
+							<button type="button" class="btn btn-mini commentSelectDocBtn"><i class="icon-file"></i> CRM-Dokument verknüpfen</button>
 						</div>
 						<ul class="commentDocList" style="list-style:none;margin:2px 0 0;padding:0;font-size:12px;"></ul>
 					</div>
