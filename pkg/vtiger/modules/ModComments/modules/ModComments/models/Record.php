@@ -363,6 +363,45 @@ class ModComments_Record_Model extends Vtiger_Record_Model {
 		return $attachments;
 	}
 
+	public function getCommentMailTo() {
+		$db = PearDatabase::getInstance();
+		$result = $db->pquery('SELECT mailto FROM vtiger_modcommentsscope WHERE modcommentsid = ?', array($this->getId()));
+		if ($db->num_rows($result)) {
+			return $db->query_result($result, 0, 'mailto');
+		}
+		return null;
+	}
+
+	public function getExternalCommentId() {
+		$db = PearDatabase::getInstance();
+		$result = $db->pquery('SELECT external FROM vtiger_modcommentsscope WHERE modcommentsid = ?', array($this->getId()));
+		if ($db->num_rows($result)) {
+			return $db->query_result($result, 0, 'external');
+		}
+		return null;
+	}
+
+	public function getCommentType() {
+		$adb = PearDatabase::getInstance();
+		$query = 'SELECT vtiger_modcomments.*, vtiger_modcommentsscope.mailto
+				  FROM vtiger_modcomments
+				  LEFT JOIN vtiger_modcommentsscope ON vtiger_modcommentsscope.modcommentsid = vtiger_modcomments.modcommentsid
+				  WHERE vtiger_modcomments.modcommentsid = ?';
+		$result = $adb->pquery($query, array($this->getId()));
+		$type = 'unknown';
+		if ($result && $adb->num_rows($result) > 0) {
+			$row = $adb->query_result_rowdata($result, 0);
+			if (!empty($row['customer'])) {
+				$type = 'customer';
+			} elseif (!empty($row['mailto'])) {
+				$type = 'outgoing';
+			} elseif (!empty($row['userid'])) {
+				$type = 'internal';
+			}
+		}
+		return $type;
+	}
+
 	/**
 	 * crm-now Extension
 	 * Function returns all count
