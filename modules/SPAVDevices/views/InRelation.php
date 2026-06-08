@@ -19,6 +19,7 @@ class SPAVDevices_InRelation_View extends Vtiger_RelatedList_View {
         }
 
         if ($tid === null || trim($tid) === '') {
+            $html .= $this->renderLicenseSummary([]);
             $html .= $this->renderAlert('info',
                 'Kein Securepoint AV Mandant verknüpft — bitte Feld <strong>cf_877</strong> am Account befüllen.');
             $html .= '</div>';
@@ -121,65 +122,65 @@ class SPAVDevices_InRelation_View extends Vtiger_RelatedList_View {
 
     private function renderLicenseSummary(array $devices): string
     {
-        if (empty($devices)) {
-            return '';
-        }
-
-        $total    = count($devices);
-        $licensed = 0;
-        $lost     = 0;
-        $byLicense = [];
+        $total     = count($devices);
+        $lost      = 0;
+        $counts    = [];
 
         foreach ($devices as $dev) {
-            $lic = trim((string)($dev['license_name'] ?? ''));
-            if ($dev['sync_status'] === 'lost') {
+            if ((string)($dev['sync_status'] ?? '') === 'lost') {
                 $lost++;
                 continue;
             }
-            if ($lic !== '') {
-                $licensed++;
-                $byLicense[$lic] = ($byLicense[$lic] ?? 0) + 1;
-            }
+            $lic = trim((string)($dev['license_name'] ?? ''));
+            $key = $lic !== '' ? $lic : '__none__';
+            $counts[$key] = ($counts[$key] ?? 0) + 1;
         }
 
-        $active    = $total - $lost;
-        $unlicensed = $active - $licensed;
+        $json = json_encode(['total' => $total, 'lost' => $lost, 'counts' => $counts],
+                             JSON_UNESCAPED_UNICODE);
 
-        // License-Breakdown Pills
-        arsort($byLicense);
-        $pills = '';
-        foreach ($byLicense as $name => $count) {
-            $pills .= '<span style="display:inline-block;background:#e8f0fe;color:#1a56db;'
-                    . 'border:1px solid #c3d4fb;border-radius:12px;padding:1px 10px;'
-                    . 'font-size:12px;margin-left:6px">'
-                    . htmlspecialchars($name) . '&nbsp;<strong>' . $count . '</strong></span>';
-        }
-        if ($unlicensed > 0) {
-            $pills .= '<span style="display:inline-block;background:#fef3cd;color:#856404;'
-                    . 'border:1px solid #fde68a;border-radius:12px;padding:1px 10px;'
-                    . 'font-size:12px;margin-left:6px">'
-                    . 'Ohne Lizenz&nbsp;<strong>' . $unlicensed . '</strong></span>';
-        }
-        if ($lost > 0) {
-            $pills .= '<span style="display:inline-block;background:#fde8e8;color:#9b1c1c;'
-                    . 'border:1px solid #f8b4b4;border-radius:12px;padding:1px 10px;'
-                    . 'font-size:12px;margin-left:6px">'
-                    . 'Nicht gefunden&nbsp;<strong>' . $lost . '</strong></span>';
-        }
-
-        $activeStr    = '<span style="color:#2e7d32;font-weight:bold">' . $active . ' aktiv</span>';
-        $licensedStr  = '<span style="color:#1a56db;font-weight:bold">' . $licensed . ' lizenziert</span>';
-
-        return '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;'
-             . 'margin-bottom:10px;padding:8px 12px;background:#f8f9fa;'
-             . 'border:1px solid #e0e0e0;border-radius:4px;font-size:13px">'
-             . '<span style="font-weight:bold;color:#333">' . $total . ' Geräte gesamt</span>'
-             . '<span style="color:#bbb;margin:0 4px">|</span>'
-             . $activeStr
-             . '<span style="color:#bbb;margin:0 4px">|</span>'
-             . $licensedStr
-             . $pills
-             . '</div>';
+        return <<<JS
+<div id="spav-license-summary" style="margin-bottom:10px"></div>
+<script type="text/javascript">
+(function(){
+    var d = {$json};
+    if (!d.total) return;
+    var active = d.total - d.lost;
+    var licensed = 0;
+    var pills = '';
+    var sorted = Object.keys(d.counts).filter(function(k){ return k !== '__none__'; })
+                       .sort(function(a,b){ return d.counts[b]-d.counts[a]; });
+    sorted.forEach(function(k){
+        licensed += d.counts[k];
+        pills += '<span style="display:inline-block;background:#e8f0fe;color:#1a56db;'
+               + 'border:1px solid #c3d4fb;border-radius:12px;padding:1px 10px;'
+               + 'font-size:12px;margin-left:8px">'
+               + k + ' <strong>' + d.counts[k] + '</strong></span>';
+    });
+    var unlicensed = d.counts['__none__'] || 0;
+    if (unlicensed) {
+        pills += '<span style="display:inline-block;background:#fef3cd;color:#856404;'
+               + 'border:1px solid #fde68a;border-radius:12px;padding:1px 10px;'
+               + 'font-size:12px;margin-left:8px">Ohne Lizenz <strong>' + unlicensed + '</strong></span>';
+    }
+    if (d.lost) {
+        pills += '<span style="display:inline-block;background:#fde8e8;color:#9b1c1c;'
+               + 'border:1px solid #f8b4b4;border-radius:12px;padding:1px 10px;'
+               + 'font-size:12px;margin-left:8px">Nicht gefunden <strong>' + d.lost + '</strong></span>';
+    }
+    var bar = '<div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:4px;'
+            + 'padding:8px 12px;font-size:13px;line-height:2">'
+            + '<strong style="color:#333">' + d.total + ' Geräte</strong>'
+            + '<span style="color:#bbb;margin:0 8px">|</span>'
+            + '<span style="color:#2e7d32;font-weight:bold">' + active + ' aktiv</span>'
+            + '<span style="color:#bbb;margin:0 8px">|</span>'
+            + '<span style="color:#1a56db;font-weight:bold">' + licensed + ' lizenziert</span>'
+            + pills + '</div>';
+    var el = document.getElementById('spav-license-summary');
+    if (el) el.innerHTML = bar;
+})();
+</script>
+JS;
     }
 
     private function renderSyncBar(int $accountId, ?string $lastSync): string
