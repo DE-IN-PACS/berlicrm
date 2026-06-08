@@ -81,4 +81,7 @@ $languageStrings = array(
 	'Update History' => 'Update History',
 	'Urgent'=>'Urgent',
 	'Wait For Response'=>'Wait For Response',
+	'LBL_COMMENT_DROP_FILES' => 'Drop files here or click to select',
+	'LBL_COMMENT_LINK_PLACEHOLDER' => 'Paste NAS/SMB/URL link, e.g. \\\\server\share\file.pdf',
+	'LBL_COMMENT_LINK_DOCUMENT' => 'Link CRM document',
 );

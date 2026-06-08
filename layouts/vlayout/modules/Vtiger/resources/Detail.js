@@ -631,6 +631,10 @@ jQuery.Class("Vtiger_Detail_Js",{
 		} else if(commentMode == "add"){
 			baseData['parent_comments'] = commentId;
 			baseData['action'] = 'SaveAjax';
+		} else if(commentMode == "sendMail"){
+			baseData['parent_comments'] = commentId;
+			baseData['action'] = 'SaveAjax';
+			baseData['sendMail'] = 1;
 		}
 
 		if (links.length > 0) {
@@ -2619,15 +2623,17 @@ jQuery.Class("Vtiger_Detail_Js",{
 		app.registerEventForTextAreaFields(jQuery('.commentcontent'));
 		this.registerEventForTotalRecordsCount();
 
-		// Register attachment events for the initial (non-cloned) add comment block
-		var initialCommentBlock = detailContentsHolder.find('.addCommentBlock').first();
-		if (initialCommentBlock.length) {
-			thisInstance.registerCommentAttachmentEvents(initialCommentBlock);
-		}
-		// Also register when widgets are loaded (tab-based comment views)
-		detailContentsHolder.on(thisInstance.widgetPostLoad, function(e, data) {
+		// Register attachment events for any already-present add comment blocks
+		jQuery('.addCommentBlock').each(function() {
+			if (!jQuery(this).data('attachmentEventsRegistered')) {
+				thisInstance.registerCommentAttachmentEvents(jQuery(this));
+				jQuery(this).data('attachmentEventsRegistered', true);
+			}
+		});
+		// Also register when widgets load (delegated on document so sidebar widgets are covered too)
+		jQuery(document).on(thisInstance.widgetPostLoad, function(e, data) {
 			if (data && data.widgetName === 'ModComments') {
-				detailContentsHolder.find('.addCommentBlock').each(function() {
+				jQuery('.addCommentBlock').each(function() {
 					if (!jQuery(this).data('attachmentEventsRegistered')) {
 						thisInstance.registerCommentAttachmentEvents(jQuery(this));
 						jQuery(this).data('attachmentEventsRegistered', true);
