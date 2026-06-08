@@ -22,7 +22,25 @@
 				<div>
 					<textarea name="commentcontent" rows="{$COMMENT_TEXTAREA_DEFAULT_ROWS}" class="commentcontent"  placeholder="{vtranslate('LBL_ADD_YOUR_COMMENT_HERE', $MODULE_NAME)}"></textarea>
 				</div>
-				<div class="pull-right">
+				<div class="commentAttachmentsArea" style="margin-top:6px;">
+					<div class="commentDropZone" style="border:2px dashed #ccc;border-radius:4px;padding:8px 12px;cursor:pointer;color:#888;font-size:12px;margin-bottom:4px;">
+						<i class="icon-upload"></i> {vtranslate('LBL_COMMENT_DROP_FILES', $MODULE_NAME)|default:'Dateien hier ablegen oder klicken zum Hochladen'}
+						<input type="file" name="comment_files[]" class="commentFileInput" multiple style="display:none;" />
+					</div>
+					<ul class="commentFileList" style="list-style:none;margin:0;padding:0;font-size:12px;"></ul>
+
+					<div class="commentLinkArea" style="margin-top:4px;display:flex;gap:6px;align-items:center;">
+						<input type="text" class="commentLinkInput input-block-level" placeholder="{vtranslate('LBL_COMMENT_LINK_PLACEHOLDER', $MODULE_NAME)|default:'NAS/SMB/URL-Link einfügen, z.B. \\\\server\share\datei.pdf'}" style="font-size:12px;flex:1;" />
+						<button type="button" class="btn btn-mini commentAddLinkBtn"><i class="icon-plus"></i> {vtranslate('LBL_ADD', $MODULE_NAME)|default:'Hinzufügen'}</button>
+					</div>
+					<ul class="commentLinkList" style="list-style:none;margin:2px 0 0;padding:0;font-size:12px;"></ul>
+
+					<div style="margin-top:4px;">
+						<button type="button" class="btn btn-mini commentSelectDocBtn"><i class="icon-file"></i> {vtranslate('LBL_COMMENT_LINK_DOCUMENT', $MODULE_NAME)|default:'CRM-Dokument verknüpfen'}</button>
+					</div>
+					<ul class="commentDocList" style="list-style:none;margin:2px 0 0;padding:0;font-size:12px;"></ul>
+				</div>
+				<div class="pull-right" style="margin-top:6px;">
 					<button class="btn btn-success saveComment" type="button" data-mode="add"><strong>{vtranslate('LBL_POST', $MODULE_NAME)}</strong></button>
 				</div>
 			</div>
@@ -38,9 +56,25 @@
 				<span class="span1">&nbsp;</span>
 				<div class="span11">
 					<textarea class="commentcontenthidden fullWidthAlways" rows="{$COMMENT_TEXTAREA_DEFAULT_ROWS}" name="commentcontent" placeholder="{vtranslate('LBL_ADD_YOUR_COMMENT_HERE', $MODULE_NAME)}"></textarea>
+					<div class="commentAttachmentsArea" style="margin-top:6px;">
+						<div class="commentDropZone" style="border:2px dashed #ccc;border-radius:4px;padding:8px 12px;cursor:pointer;color:#888;font-size:12px;margin-bottom:4px;">
+							<i class="icon-upload"></i> {vtranslate('LBL_COMMENT_DROP_FILES', $MODULE_NAME)|default:'Dateien hier ablegen oder klicken zum Hochladen'}
+							<input type="file" name="comment_files[]" class="commentFileInput" multiple style="display:none;" />
+						</div>
+						<ul class="commentFileList" style="list-style:none;margin:0;padding:0;font-size:12px;"></ul>
+						<div class="commentLinkArea" style="margin-top:4px;display:flex;gap:6px;align-items:center;">
+							<input type="text" class="commentLinkInput input-block-level" placeholder="{vtranslate('LBL_COMMENT_LINK_PLACEHOLDER', $MODULE_NAME)|default:'NAS/SMB/URL-Link einfügen, z.B. \\\\server\share\datei.pdf'}" style="font-size:12px;flex:1;" />
+							<button type="button" class="btn btn-mini commentAddLinkBtn"><i class="icon-plus"></i> {vtranslate('LBL_ADD', $MODULE_NAME)|default:'Hinzufügen'}</button>
+						</div>
+						<ul class="commentLinkList" style="list-style:none;margin:2px 0 0;padding:0;font-size:12px;"></ul>
+						<div style="margin-top:4px;">
+							<button type="button" class="btn btn-mini commentSelectDocBtn"><i class="icon-file"></i> {vtranslate('LBL_COMMENT_LINK_DOCUMENT', $MODULE_NAME)|default:'CRM-Dokument verknüpfen'}</button>
+						</div>
+						<ul class="commentDocList" style="list-style:none;margin:2px 0 0;padding:0;font-size:12px;"></ul>
+					</div>
 				</div>
 			</div>
-			<div class="pull-right">
+			<div class="pull-right" style="margin-top:6px;">
 				<button class="btn btn-success saveComment" type="button" data-mode="add"><strong>{vtranslate('LBL_POST', $MODULE_NAME)}</strong></button>
 				<a class="cursorPointer closeCommentBlock" type="reset">{vtranslate('LBL_CANCEL', $MODULE_NAME)}</a>
 			</div>

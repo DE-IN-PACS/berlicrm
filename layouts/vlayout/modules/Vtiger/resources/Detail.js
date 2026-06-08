@@ -599,35 +599,209 @@ jQuery.Class("Vtiger_Detail_Js",{
 		var commentInfoHeader = closestCommentBlock.closest('.commentDetails').find('.commentInfoHeader');
 		var commentId = commentInfoHeader.data('commentid');
 		var parentCommentId = commentInfoHeader.data('parentcommentid');
-		var postData = {
-			'commentcontent' : 	commentContentValue,
-			'related_to': thisInstance.getRecordId(),
-			'module' : 'ModComments'
-		}
+
+		// Collect attachment data
+		var fileInput = closestCommentBlock.find('.commentFileInput')[0];
+		var hasFiles = fileInput && fileInput.files && fileInput.files.length > 0;
+
+		// Collect links
+		var links = [];
+		closestCommentBlock.find('.commentLinkList li').each(function() {
+			links.push(jQuery(this).data('link'));
+		});
+
+		// Collect document ids
+		var docIds = [];
+		closestCommentBlock.find('.commentDocList li').each(function() {
+			docIds.push(jQuery(this).data('docid'));
+		});
+
+		var baseData = {
+			'commentcontent' : commentContentValue,
+			'related_to'     : thisInstance.getRecordId(),
+			'module'         : 'ModComments'
+		};
 
 		if(commentMode == "edit"){
-			postData['record'] = commentId;
-			postData['reasontoedit'] = editCommentReason;
-			postData['parent_comments'] = parentCommentId;
-			postData['mode'] = 'edit';
-			postData['action'] = 'Save';
+			baseData['record'] = commentId;
+			baseData['reasontoedit'] = editCommentReason;
+			baseData['parent_comments'] = parentCommentId;
+			baseData['mode'] = 'edit';
+			baseData['action'] = 'Save';
 		} else if(commentMode == "add"){
-			postData['parent_comments'] = commentId;
-			postData['action'] = 'SaveAjax';
+			baseData['parent_comments'] = commentId;
+			baseData['action'] = 'SaveAjax';
 		}
-		AppConnector.request(postData).then(
-			function(data){
-				progressIndicatorElement.progressIndicator({'mode':'hide'});
-				aDeferred.resolve(data);
-			},
-			function(textStatus, errorThrown){
-				progressIndicatorElement.progressIndicator({'mode':'hide'});
-				element.removeAttr('disabled');
-				aDeferred.reject(textStatus, errorThrown);
+
+		if (links.length > 0) {
+			baseData['file_links'] = JSON.stringify(links);
+		}
+		if (docIds.length > 0) {
+			baseData['document_ids'] = JSON.stringify(docIds);
+		}
+
+		var requestPromise;
+		if (hasFiles && commentMode !== 'edit') {
+			var formData = new FormData();
+			jQuery.each(baseData, function(k, v) { formData.append(k, v); });
+			formData.append('__vtrftk', csrfMagicToken);
+			for (var i = 0; i < fileInput.files.length; i++) {
+				formData.append('comment_files[]', fileInput.files[i]);
 			}
+			requestPromise = {
+				then: function(successCb, errorCb) {
+					jQuery.ajax({
+						url         : 'index.php',
+						type        : 'POST',
+						data        : formData,
+						processData : false,
+						contentType : false,
+						dataType    : 'json'
+					}).done(function(data) {
+						progressIndicatorElement.progressIndicator({'mode':'hide'});
+						successCb(data);
+					}).fail(function(jqXHR, textStatus) {
+						progressIndicatorElement.progressIndicator({'mode':'hide'});
+						element.removeAttr('disabled');
+						if (errorCb) errorCb(textStatus);
+					});
+					return this;
+				}
+			};
+		} else {
+			requestPromise = {
+				then: function(successCb, errorCb) {
+					baseData['__vtrftk'] = csrfMagicToken;
+					AppConnector.request(baseData).then(
+						function(data) {
+							progressIndicatorElement.progressIndicator({'mode':'hide'});
+							successCb(data);
+						},
+						function(textStatus, errorThrown) {
+							progressIndicatorElement.progressIndicator({'mode':'hide'});
+							element.removeAttr('disabled');
+							if (errorCb) errorCb(textStatus, errorThrown);
+						}
+					);
+					return this;
+				}
+			};
+		}
+
+		requestPromise.then(
+			function(data) { aDeferred.resolve(data); },
+			function(textStatus, errorThrown) { aDeferred.reject(textStatus, errorThrown); }
 		);
 
 		return aDeferred.promise();
+	},
+
+	/**
+	 * Register attachment-related events on a comment block
+	 */
+	registerCommentAttachmentEvents : function(commentBlock) {
+		var dropZone = commentBlock.find('.commentDropZone');
+		var fileInput = commentBlock.find('.commentFileInput');
+		var fileList = commentBlock.find('.commentFileList');
+
+		// Click on drop zone opens file dialog
+		dropZone.on('click', function(e) {
+			if (!jQuery(e.target).is('input')) {
+				fileInput.trigger('click');
+			}
+		});
+
+		// Drag & Drop
+		dropZone.on('dragover dragenter', function(e) {
+			e.preventDefault();
+			e.stopPropagation();
+			dropZone.css('border-color', '#3a87ad');
+		}).on('dragleave dragend drop', function(e) {
+			e.preventDefault();
+			e.stopPropagation();
+			dropZone.css('border-color', '#ccc');
+		}).on('drop', function(e) {
+			var dt = e.originalEvent.dataTransfer;
+			if (dt && dt.files.length) {
+				// Merge dropped files with existing (create new FileList-like object)
+				var existing = fileInput[0].files;
+				var dt2 = new DataTransfer();
+				for (var i = 0; i < existing.length; i++) dt2.items.add(existing[i]);
+				for (var j = 0; j < dt.files.length; j++) dt2.items.add(dt.files[j]);
+				fileInput[0].files = dt2.files;
+				renderFileList(fileInput[0].files);
+			}
+		});
+
+		fileInput.on('change', function() {
+			renderFileList(this.files);
+		});
+
+		function renderFileList(files) {
+			fileList.empty();
+			for (var i = 0; i < files.length; i++) {
+				var name = files[i].name;
+				var size = (files[i].size / 1024).toFixed(1) + ' KB';
+				fileList.append(
+					'<li style="padding:2px 0;"><i class="icon-file"></i> ' + jQuery('<span>').text(name).html() +
+					' <small class="muted">(' + size + ')</small>' +
+					' <a class="commentRemoveFile cursorPointer" data-index="' + i + '" style="color:red;margin-left:4px;">&times;</a></li>'
+				);
+			}
+		}
+
+		// Remove file from list
+		fileList.on('click', '.commentRemoveFile', function() {
+			var idx = parseInt(jQuery(this).data('index'));
+			var dt2 = new DataTransfer();
+			var files = fileInput[0].files;
+			for (var i = 0; i < files.length; i++) {
+				if (i !== idx) dt2.items.add(files[i]);
+			}
+			fileInput[0].files = dt2.files;
+			renderFileList(fileInput[0].files);
+		});
+
+		// Add link button
+		commentBlock.find('.commentAddLinkBtn').on('click', function() {
+			var linkInput = commentBlock.find('.commentLinkInput');
+			var val = linkInput.val().trim();
+			if (!val) return;
+			var linkList = commentBlock.find('.commentLinkList');
+			linkList.append(
+				'<li style="padding:2px 0;" data-link="' + jQuery('<span>').text(val).html() + '">' +
+				'<i class="icon-share"></i> ' + jQuery('<span>').text(val).html() +
+				' <a class="commentRemoveLink cursorPointer" style="color:red;margin-left:4px;">&times;</a></li>'
+			);
+			linkInput.val('');
+		});
+
+		commentBlock.find('.commentLinkList').on('click', '.commentRemoveLink', function() {
+			jQuery(this).closest('li').remove();
+		});
+
+		// Document select popup
+		commentBlock.find('.commentSelectDocBtn').on('click', function() {
+			var eventName = 'commentDocSelected' + Math.floor(Math.random() * 100000);
+			var popupInstance = Vtiger_Popup_Js.getInstance();
+			popupInstance.show({'module': 'Documents', 'src_module': 'ModComments', 'multiselect': ''}, null, 'commentDocPopup', eventName);
+			jQuery(document).one(eventName, function(e, docData) {
+				var docId = docData.id || docData.record;
+				var docName = docData.name || docData.label || docId;
+				var docList = commentBlock.find('.commentDocList');
+				// Avoid duplicates
+				if (docList.find('[data-docid="' + docId + '"]').length) return;
+				docList.append(
+					'<li style="padding:2px 0;" data-docid="' + docId + '">' +
+					'<i class="icon-file-text"></i> ' + jQuery('<span>').text(docName).html() +
+					' <a class="commentRemoveDoc cursorPointer" style="color:red;margin-left:4px;">&times;</a></li>'
+				);
+			});
+		});
+
+		commentBlock.find('.commentDocList').on('click', '.commentRemoveDoc', function() {
+			jQuery(this).closest('li').remove();
+		});
 	},
 
 	/**
@@ -660,6 +834,7 @@ jQuery.Class("Vtiger_Detail_Js",{
 		var detailContentsHolder = this.getContentHolder();
 		var clonedCommentBlock = jQuery('.basicAddCommentBlock',detailContentsHolder).clone(true,true).removeClass('basicAddCommentBlock hide').addClass('addCommentBlock');
 		clonedCommentBlock.find('.commentcontenthidden').removeClass('commentcontenthidden').addClass('commentcontent');
+		this.registerCommentAttachmentEvents(clonedCommentBlock);
 		return clonedCommentBlock;
 	},
 
@@ -2443,5 +2618,22 @@ jQuery.Class("Vtiger_Detail_Js",{
 
 		app.registerEventForTextAreaFields(jQuery('.commentcontent'));
 		this.registerEventForTotalRecordsCount();
+
+		// Register attachment events for the initial (non-cloned) add comment block
+		var initialCommentBlock = detailContentsHolder.find('.addCommentBlock').first();
+		if (initialCommentBlock.length) {
+			thisInstance.registerCommentAttachmentEvents(initialCommentBlock);
+		}
+		// Also register when widgets are loaded (tab-based comment views)
+		detailContentsHolder.on(thisInstance.widgetPostLoad, function(e, data) {
+			if (data && data.widgetName === 'ModComments') {
+				detailContentsHolder.find('.addCommentBlock').each(function() {
+					if (!jQuery(this).data('attachmentEventsRegistered')) {
+						thisInstance.registerCommentAttachmentEvents(jQuery(this));
+						jQuery(this).data('attachmentEventsRegistered', true);
+					}
+				});
+			}
+		});
 	}
 });

@@ -302,6 +302,68 @@ class ModComments_Record_Model extends Vtiger_Record_Model {
 	}
 	
 	/**
+	 * Returns all attachments for this comment (uploaded files, external links, CRM documents)
+	 * @return array of attachment info arrays
+	 */
+	public function getAttachments() {
+		$db = PearDatabase::getInstance();
+		$commentId = $this->getId();
+		$attachments = array();
+
+		// Uploaded files and external links
+		$result = $db->pquery(
+			'SELECT va.attachmentsid, va.name, va.type, va.path, ve.setype
+			 FROM vtiger_seattachmentsrel vsar
+			 INNER JOIN vtiger_attachments va ON va.attachmentsid = vsar.attachmentsid
+			 INNER JOIN vtiger_crmentity ve ON ve.crmid = va.attachmentsid
+			 WHERE vsar.crmid = ? AND ve.deleted = 0',
+			array($commentId)
+		);
+		$rows = $db->num_rows($result);
+		for ($i = 0; $i < $rows; $i++) {
+			$row = $db->query_result_rowdata($result, $i);
+			if ($row['setype'] === 'ModComments Link') {
+				$attachments[] = array(
+					'type'  => 'link',
+					'name'  => $row['name'],
+					'url'   => $row['name'],
+					'id'    => $row['attachmentsid'],
+				);
+			} else {
+				$attachments[] = array(
+					'type'  => 'file',
+					'name'  => $row['name'],
+					'id'    => $row['attachmentsid'],
+				);
+			}
+		}
+
+		// Linked CRM Documents (if table exists)
+		$tableCheck = $db->pquery("SHOW TABLES LIKE 'vtiger_modcomments_docrel'", array());
+		if ($db->num_rows($tableCheck) > 0) {
+			$docResult = $db->pquery(
+				'SELECT vmdr.documentid, vn.title, vn.filename
+				 FROM vtiger_modcomments_docrel vmdr
+				 INNER JOIN vtiger_notes vn ON vn.notesid = vmdr.documentid
+				 INNER JOIN vtiger_crmentity ve ON ve.crmid = vmdr.documentid AND ve.deleted = 0
+				 WHERE vmdr.modcommentsid = ?',
+				array($commentId)
+			);
+			$docRows = $db->num_rows($docResult);
+			for ($i = 0; $i < $docRows; $i++) {
+				$row = $db->query_result_rowdata($docResult, $i);
+				$attachments[] = array(
+					'type'       => 'document',
+					'name'       => !empty($row['title']) ? $row['title'] : $row['filename'],
+					'documentid' => $row['documentid'],
+				);
+			}
+		}
+
+		return $attachments;
+	}
+
+	/**
 	 * crm-now Extension
 	 * Function returns all count
 	 * @return <type>

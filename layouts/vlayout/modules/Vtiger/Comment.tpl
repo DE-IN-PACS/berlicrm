@@ -41,6 +41,29 @@
 						<div class="commentInfoContent">
 							{nl2br($COMMENT->get('commentcontent'))}
 						</div>
+						{assign var=COMMENT_ATTACHMENTS value=$COMMENT->getAttachments()}
+						{if !empty($COMMENT_ATTACHMENTS)}
+						<div class="commentAttachmentsList" style="margin-top:6px;font-size:12px;">
+							{foreach from=$COMMENT_ATTACHMENTS item=ATT}
+								{if $ATT.type eq 'file'}
+									<div style="margin-bottom:2px;">
+										<i class="icon-file"></i>
+										<a href="index.php?module=ModComments&action=DownloadFile&fileid={$ATT.id}" target="_blank">{$ATT.name|escape:'html'}</a>
+									</div>
+								{elseif $ATT.type eq 'link'}
+									<div style="margin-bottom:2px;">
+										<i class="icon-share"></i>
+										<a href="{$ATT.url|escape:'html'}" target="_blank">{$ATT.name|escape:'html'}</a>
+									</div>
+								{elseif $ATT.type eq 'document'}
+									<div style="margin-bottom:2px;">
+										<i class="icon-file-text"></i>
+										<a href="index.php?module=Documents&action=DetailView&record={$ATT.documentid}" target="_blank">{$ATT.name|escape:'html'}</a>
+									</div>
+								{/if}
+							{/foreach}
+						</div>
+						{/if}
 					</div>
 				</div>
 			</div>
