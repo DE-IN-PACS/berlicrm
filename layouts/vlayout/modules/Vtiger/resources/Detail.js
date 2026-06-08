@@ -599,6 +599,7 @@ jQuery.Class("Vtiger_Detail_Js",{
 		var commentInfoHeader = closestCommentBlock.closest('.commentDetails').find('.commentInfoHeader');
 		var commentId = commentInfoHeader.data('commentid');
 		var parentCommentId = commentInfoHeader.data('parentcommentid');
+		var external = closestCommentBlock.find('#externalComment').is(':checked');
 
 		// Collect attachment data
 		var fileInput = closestCommentBlock.find('.commentFileInput')[0];
@@ -619,7 +620,8 @@ jQuery.Class("Vtiger_Detail_Js",{
 		var baseData = {
 			'commentcontent' : commentContentValue,
 			'related_to'     : thisInstance.getRecordId(),
-			'module'         : 'ModComments'
+			'module'         : 'ModComments',
+			'external'       : external
 		};
 
 		if(commentMode == "edit"){
