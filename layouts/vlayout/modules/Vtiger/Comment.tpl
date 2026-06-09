@@ -47,7 +47,7 @@
 								</span>
 								{if $COMMENT->getCommentMailTo() != NULL}
 									<div class="muted displayInlineBlock marginBottom10px">
-										({vtranslate('LBL_MAILTO',$MODULE_NAME)}:&nbsp;
+										(E-Mail an:&nbsp;
 										{$COMMENT->getCommentMailTo()})
 									</div>
 								{/if}

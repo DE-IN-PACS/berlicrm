@@ -2540,7 +2540,8 @@ jQuery.Class("Vtiger_Detail_Js",{
 
 		jQuery(document).on('click', '.commentDropZone', function(e) {
 			if (!jQuery(e.target).is('input')) {
-				jQuery(this).find('.commentFileInput').trigger('click');
+				var fi = jQuery(this).find('.commentFileInput')[0];
+				if (fi) { fi.click(); }
 			}
 		});
 

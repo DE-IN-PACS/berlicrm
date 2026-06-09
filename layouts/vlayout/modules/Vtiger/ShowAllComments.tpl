@@ -44,7 +44,7 @@
 					<div style="display:inline-block; margin-right:20px; margin-top:6px;">
 						<input type="checkbox" id="externalComment" name="externalComment" class="alignTop">&nbsp;
 						<label for="externalComment"
-							style="display:inline;">{vtranslate('LBL_EXTERNAL_COMMENT', $MODULE_NAME)}</label>
+							style="display:inline;">Externer Kommentar</label>
 					</div>
 				{/if}
 				<div class="pull-right" style="margin-top:6px;">
@@ -54,7 +54,7 @@
 				{if $MODULE_NAME == 'HelpDesk'}
 					<div class="pull-right" style="margin-top:6px;">
 						<button class="btn saveButton saveComment" type="button"
-							data-mode="sendMail"><strong>{vtranslate('LBL_SEND_MAIL_AND_POST', $MODULE_NAME)}</strong></button>
+							data-mode="sendMail"><strong>Mail senden und veröffentlichen</strong></button>
 					</div>
 				{/if}
 			</div>
@@ -117,7 +117,7 @@
 			{if $MODULE_NAME == 'HelpDesk'}
 				<div style="display:inline-block; margin-right:20px;">
 					<input type="checkbox" id="externalComment" name="externalComment" class="alignTop">&nbsp;
-					<label style="display:inline;">{vtranslate('LBL_EXTERNAL_COMMENT', $MODULE_NAME)}</label>
+					<label style="display:inline;">Externer Kommentar</label>
 				</div>
 			{/if}
 			<div class="pull-right">
